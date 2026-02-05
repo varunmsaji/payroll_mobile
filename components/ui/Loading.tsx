@@ -6,6 +6,7 @@ import {
     Text,
     StyleSheet,
     ViewStyle,
+    DimensionValue,
 } from 'react-native';
 import { Colors, Spacing, Typography } from '../../constants/theme';
 
@@ -40,7 +41,7 @@ export const Loading: React.FC<LoadingProps> = ({
 
 // Skeleton loader for content placeholders
 export const Skeleton: React.FC<{
-    width?: number | string;
+    width?: DimensionValue;
     height?: number;
     borderRadius?: number;
     style?: ViewStyle;
