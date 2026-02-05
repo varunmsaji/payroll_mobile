@@ -6,6 +6,11 @@ import { router } from 'expo-router';
 // API base URL - update this for your environment
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://10.0.2.2:8000';
 
+console.log('API Config:', {
+    EXPO_PUBLIC_API_URL: process.env.EXPO_PUBLIC_API_URL,
+    RESOLVED_API_BASE_URL: API_BASE_URL
+});
+
 // Create axios instance
 const api: AxiosInstance = axios.create({
     baseURL: API_BASE_URL,
@@ -18,6 +23,7 @@ const api: AxiosInstance = axios.create({
 // Request interceptor - add auth token
 api.interceptors.request.use(
     async (config: InternalAxiosRequestConfig) => {
+        console.log('API Request:', config.method?.toUpperCase(), config.url);
         const token = await storage.getToken();
         if (token) {
             config.headers.Authorization = `Bearer ${token}`;
@@ -25,14 +31,24 @@ api.interceptors.request.use(
         return config;
     },
     (error: AxiosError) => {
+        console.error('API Request Error:', error);
         return Promise.reject(error);
     }
 );
 
 // Response interceptor - handle 401 errors
 api.interceptors.response.use(
-    (response) => response,
+    (response) => {
+        console.log('API Response:', response.status, response.config.url);
+        return response;
+    },
     async (error: AxiosError) => {
+        console.error('API Response Error:', {
+            url: error.config?.url,
+            status: error.response?.status,
+            message: error.message,
+            data: error.response?.data
+        });
         if (error.response?.status === 401) {
             // Clear auth data and redirect to login
             await storage.clearAuth();
@@ -143,8 +159,7 @@ export const apiClient = {
 
     // Dashboard
     dashboard: {
-        stats: () => api.get('/dashboard/stats'),
-        recentActivity: () => api.get('/dashboard/activity'),
+        overview: () => api.get('/hrms/admin/dashboard/overview'),
     },
 };
 

@@ -15,7 +15,7 @@ import { Icon } from '../../components/Icon';
 import { Colors, Spacing, Typography, BorderRadius } from '../../constants/theme';
 import { apiClient } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
-import { DashboardStats } from '../../types';
+import { DashboardOverviewResponse } from '../../types';
 
 interface StatCardProps {
     title: string;
@@ -53,38 +53,30 @@ const QuickAction: React.FC<QuickActionProps> = ({ title, icon, onPress }) => (
 
 export default function DashboardScreen() {
     const { user, logout } = useAuth();
-    const [stats, setStats] = useState<DashboardStats | null>(null);
+    const [data, setData] = useState<DashboardOverviewResponse | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
 
-    const fetchStats = useCallback(async () => {
+    const fetchData = useCallback(async () => {
         try {
-            const response = await apiClient.dashboard.stats();
-            setStats(response.data);
+            const response = await apiClient.dashboard.overview();
+            setData(response.data);
         } catch (error) {
-            console.error('Error fetching stats:', error);
-            // Set default stats on error
-            setStats({
-                total_employees: 0,
-                present_today: 0,
-                on_leave_today: 0,
-                pending_leaves: 0,
-                pending_payroll: 0,
-            });
+            console.error('Error fetching dashboard data:', error);
         } finally {
             setIsLoading(false);
         }
     }, []);
 
     useEffect(() => {
-        fetchStats();
-    }, [fetchStats]);
+        fetchData();
+    }, [fetchData]);
 
     const onRefresh = useCallback(async () => {
         setRefreshing(true);
-        await fetchStats();
+        await fetchData();
         setRefreshing(false);
-    }, [fetchStats]);
+    }, [fetchData]);
 
     const getRoleLabel = () => {
         switch (user?.role) {
@@ -98,6 +90,8 @@ export default function DashboardScreen() {
     if (isLoading) {
         return <Loading fullScreen text="Loading dashboard..." />;
     }
+
+    const { employees, attendance_today, overtime_today_hours, shift_distribution, recent_activity } = data || {};
 
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
@@ -113,42 +107,59 @@ export default function DashboardScreen() {
                     <View>
                         <Text style={styles.greeting}>Welcome back,</Text>
                         <Text style={styles.userName}>{getRoleLabel()}</Text>
+                        <Text style={styles.date}>{new Date().toDateString()}</Text>
                     </View>
                     <TouchableOpacity style={styles.avatarContainer}>
                         <Icon name="user" size={24} color={Colors.text.inverse} />
                     </TouchableOpacity>
                 </View>
 
-                {/* Stats Grid */}
-                <Text style={styles.sectionTitle}>Overview</Text>
+                {/* Employee Stats */}
+                <Text style={styles.sectionTitle}>Employee Overview</Text>
                 <View style={styles.statsGrid}>
                     <StatCard
                         title="Total Employees"
-                        value={stats?.total_employees || 0}
+                        value={employees?.total || 0}
                         icon="users"
                         color={Colors.primary[600]}
                         onPress={() => router.push('/(tabs)/employees')}
                     />
                     <StatCard
-                        title="Present Today"
-                        value={stats?.present_today || 0}
+                        title="Active Now"
+                        value={employees?.active || 0}
+                        icon="user-check"
+                        color={Colors.success.main}
+                    />
+                </View>
+
+                {/* Attendance Today */}
+                <Text style={styles.sectionTitle}>Attendance Today</Text>
+                <View style={styles.statsGrid}>
+                    <StatCard
+                        title="Present"
+                        value={attendance_today?.present || 0}
                         icon="check-circle"
                         color={Colors.success.main}
                         onPress={() => router.push('/(tabs)/attendance')}
                     />
                     <StatCard
-                        title="On Leave"
-                        value={stats?.on_leave_today || 0}
-                        icon="calendar"
-                        color={Colors.warning.main}
-                        onPress={() => router.push('/(tabs)/leaves')}
+                        title="Absent"
+                        value={attendance_today?.absent || 0}
+                        icon="x-circle"
+                        color={Colors.error.main}
+                        onPress={() => router.push('/(tabs)/attendance')}
                     />
                     <StatCard
-                        title="Pending Leaves"
-                        value={stats?.pending_leaves || 0}
+                        title="Late"
+                        value={attendance_today?.late || 0}
                         icon="clock"
+                        color={Colors.warning.main}
+                    />
+                    <StatCard
+                        title="Overtime (Hrs)"
+                        value={overtime_today_hours || 0}
+                        icon="briefcase"
                         color={Colors.info.main}
-                        onPress={() => router.push('/(tabs)/leaves')}
                     />
                 </View>
 
@@ -174,41 +185,36 @@ export default function DashboardScreen() {
                     />
                     <View style={styles.divider} />
                     <QuickAction
-                        title="Process Payroll"
-                        icon="wallet"
-                        onPress={() => router.push('/(tabs)/payroll')}
-                    />
-                    <View style={styles.divider} />
-                    <QuickAction
                         title="Shift Management"
                         icon="clock"
                         onPress={() => router.push('/(tabs)/shifts')}
                     />
                 </Card>
 
-                {/* Pending Approvals */}
-                {(user?.role === 'admin' || user?.role === 'hr') && (stats?.pending_leaves || 0) > 0 && (
-                    <>
-                        <Text style={styles.sectionTitle}>Pending Approvals</Text>
-                        <Card
-                            style={styles.alertCard}
-                            onPress={() => router.push('/(tabs)/leaves')}
-                        >
-                            <View style={styles.alertContent}>
-                                <View style={[styles.alertIcon, { backgroundColor: Colors.warning.light }]}>
-                                    <Icon name="warning" size={20} color={Colors.warning.main} />
+                {/* Recent Activity */}
+                <Text style={styles.sectionTitle}>Recent Activity</Text>
+                <Card style={styles.activityCard}>
+                    {recent_activity?.length === 0 ? (
+                        <Text style={styles.emptyText}>No recent activity</Text>
+                    ) : (
+                        recent_activity?.map((activity, index) => (
+                            <View key={index}>
+                                <View style={styles.activityItem}>
+                                    <View style={styles.activityIcon}>
+                                        <Icon name="clock" size={16} color={Colors.primary[600]} />
+                                    </View>
+                                    <View style={styles.activityContent}>
+                                        <Text style={styles.activityTitle}>{activity.employee_name}</Text>
+                                        <Text style={styles.activitySubtitle}>
+                                            {activity.event_type} • {new Date(activity.event_time).toLocaleTimeString()}
+                                        </Text>
+                                    </View>
                                 </View>
-                                <View style={styles.alertText}>
-                                    <Text style={styles.alertTitle}>
-                                        {stats?.pending_leaves} Leave Request{(stats?.pending_leaves || 0) > 1 ? 's' : ''} Pending
-                                    </Text>
-                                    <Text style={styles.alertSubtitle}>Tap to review and approve</Text>
-                                </View>
-                                <Icon name="chevron-right" size={20} color={Colors.text.tertiary} />
+                                {index < recent_activity.length - 1 && <View style={styles.divider} />}
                             </View>
-                        </Card>
-                    </>
-                )}
+                        ))
+                    )}
+                </Card>
             </ScrollView>
         </SafeAreaView>
     );
@@ -336,5 +342,45 @@ const styles = StyleSheet.create({
         fontSize: Typography.size.sm,
         color: Colors.text.secondary,
         marginTop: 2,
+    },
+    date: {
+        fontSize: Typography.size.sm,
+        color: Colors.text.tertiary,
+        marginTop: 2,
+    },
+    activityCard: {
+        padding: 0,
+    },
+    activityItem: {
+        flexDirection: 'row',
+        padding: Spacing.lg,
+        alignItems: 'center',
+    },
+    activityIcon: {
+        width: 32,
+        height: 32,
+        borderRadius: BorderRadius.full,
+        backgroundColor: Colors.primary[50],
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: Spacing.md,
+    },
+    activityContent: {
+        flex: 1,
+    },
+    activityTitle: {
+        fontSize: Typography.size.sm,
+        fontWeight: Typography.weight.medium,
+        color: Colors.text.primary,
+    },
+    activitySubtitle: {
+        fontSize: Typography.size.xs,
+        color: Colors.text.secondary,
+        marginTop: 2,
+    },
+    emptyText: {
+        padding: Spacing.lg,
+        textAlign: 'center',
+        color: Colors.text.secondary,
     },
 });

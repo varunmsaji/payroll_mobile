@@ -26,6 +26,11 @@ export const storage = {
      */
     async set(key: StorageKey, value: string): Promise<boolean> {
         try {
+            console.log(`Storage.set: key=${key}, valueType=${typeof value}, valuePreview=${value?.substring?.(0, 50)}`);
+            if (value === undefined || value === null) {
+                console.error(`Cannot save null/undefined value for key: ${key}`);
+                return false;
+            }
             await SecureStore.setItemAsync(key, value);
             return true;
         } catch (error) {

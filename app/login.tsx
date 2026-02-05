@@ -32,6 +32,7 @@ export default function LoginScreen() {
         setIsLoading(true);
         setError(null);
 
+        console.log('Attempting login for:', email.trim());
         const result = await login(email.trim(), password);
 
         if (result.success) {

@@ -1,3 +1,4 @@
+import { Redirect } from 'expo-router';
 import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
 import { useAuth } from '../lib/auth';
 import { Colors } from '../constants/theme';
@@ -13,20 +14,11 @@ export default function Index() {
         );
     }
 
-    // if (isAuthenticated) {
-    //     return <Redirect href="/(tabs)/dashboard" />;
-    // }
+    if (isAuthenticated) {
+        return <Redirect href="/(tabs)/dashboard" />;
+    }
 
-    return (
-        <View style={styles.container}>
-            <Text style={{ fontSize: 24 }}>Debug: Loading...</Text>
-            {isLoading ? (
-                <ActivityIndicator size="large" color={Colors.primary[600]} />
-            ) : (
-                <Text>Auth State: {isAuthenticated ? 'Logged In' : 'Logged Out'}</Text>
-            )}
-        </View>
-    );
+    return <Redirect href="/login" />;
 }
 
 const styles = StyleSheet.create({

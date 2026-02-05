@@ -150,3 +150,36 @@ export interface DashboardStats {
     pending_leaves: number;
     pending_payroll: number;
 }
+
+export interface EmployeeCounts {
+    total: number;
+    active: number;
+}
+
+export interface AttendanceToday {
+    present: number;
+    absent: number;
+    late: number;
+}
+
+export interface ShiftDistribution {
+    shift_name: string;
+    employees_assigned: number;
+}
+
+export interface RecentActivity {
+    employee_id: number;
+    employee_name: string;
+    event_type: string;
+    event_time: string;
+    source: string;
+}
+
+export interface DashboardOverviewResponse {
+    date: string;
+    employees: EmployeeCounts;
+    attendance_today: AttendanceToday;
+    overtime_today_hours: number;
+    shift_distribution: ShiftDistribution[];
+    recent_activity: RecentActivity[];
+}

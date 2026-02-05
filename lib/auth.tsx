@@ -49,16 +49,30 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const login = useCallback(async (email: string, password: string) => {
         try {
             const response = await apiClient.auth.login(email, password);
-            const { access_token, user: userData } = response.data;
+            console.log('Login Response Data:', response.data);
+
+            // Backend returns flat structure, map it to our User object
+            const userData: AuthUser = {
+                id: response.data.user_id,
+                email: email, // Email isn't returned, but we have it from input
+                role: response.data.role,
+                employeeId: response.data.employee_id
+            };
+
+            const access_token = response.data.access_token;
+            console.log('Constructed User Data:', userData);
 
             // Store token and user data
-            await storage.setToken(access_token);
-            await storage.setUser(userData);
+            if (access_token) {
+                await storage.setToken(access_token);
+            }
 
+            await storage.setUser(userData);
             setUser(userData);
 
             return { success: true };
         } catch (error: any) {
+            console.error('Login Error Detail:', error);
             const message = error.response?.data?.detail || 'Login failed. Please try again.';
             return { success: false, error: message };
         }
