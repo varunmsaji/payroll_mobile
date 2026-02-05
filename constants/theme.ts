@@ -70,6 +70,13 @@ export const Colors = {
         medium: '#CBD5E1',
         dark: '#94A3B8',
     },
+    // Accent colors
+    accent: {
+        green: '#10B981',
+        orange: '#F59E0B',
+        red: '#EF4444',
+        yellow: '#EAB308',
+    },
 };
 
 export const Spacing = {
@@ -99,9 +106,12 @@ export const Typography = {
     size: {
         xs: 12,
         sm: 14,
+        md: 16,
         base: 16,
         lg: 18,
         xl: 20,
+        xxl: 24,
+        xxxl: 30,
         '2xl': 24,
         '3xl': 30,
         '4xl': 36,

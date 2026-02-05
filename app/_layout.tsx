@@ -3,7 +3,6 @@ import React from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { AuthProvider } from '../lib/auth';
-import { Colors } from '../constants/theme';
 
 export default function RootLayout() {
     return (
@@ -16,7 +15,9 @@ export default function RootLayout() {
             >
                 <Stack.Screen name="index" />
                 <Stack.Screen name="login" />
-                <Stack.Screen name="(tabs)" />
+                <Stack.Screen name="(admin)" />
+                <Stack.Screen name="(hr)" />
+                <Stack.Screen name="(employee)" />
             </Stack>
         </AuthProvider>
     );

@@ -53,10 +53,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
             // Backend returns flat structure, map it to our User object
             const userData: AuthUser = {
-                id: response.data.user_id,
-                email: email, // Email isn't returned, but we have it from input
+                user_id: response.data.user_id,
                 role: response.data.role,
-                employeeId: response.data.employee_id
+                employee_id: response.data.employee_id
             };
 
             const access_token = response.data.access_token;
@@ -116,12 +115,13 @@ export const useAuth = (): AuthContextType => {
 export const getRedirectPathForRole = (role: UserRole): string => {
     switch (role) {
         case 'admin':
+            return '/(admin)/dashboard';
         case 'hr':
-            return '/(tabs)/dashboard';
+            return '/(hr)/dashboard';
         case 'employee':
-            return '/(tabs)/dashboard';
+            return '/(employee)/home';
         default:
-            return '/(tabs)/dashboard';
+            return '/login';
     }
 };
 

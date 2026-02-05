@@ -1,14 +1,13 @@
-// Tab navigator layout
+// HR tab navigator layout
 import React from 'react';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
-import { Tabs } from 'expo-router';
+import { Tabs, Redirect } from 'expo-router';
 import { Icon } from '../../components/Icon';
 import { Colors, Typography } from '../../constants/theme';
 import { useAuth } from '../../lib/auth';
-import { Redirect } from 'expo-router';
 
-export default function TabLayout() {
-    const { isAuthenticated, isLoading } = useAuth();
+export default function HRLayout() {
+    const { isAuthenticated, isLoading, user } = useAuth();
 
     if (isLoading) {
         return (
@@ -19,6 +18,11 @@ export default function TabLayout() {
     }
 
     if (!isAuthenticated) {
+        return <Redirect href="/login" />;
+    }
+
+    // Only allow HR users
+    if (user?.role !== 'hr') {
         return <Redirect href="/login" />;
     }
 
@@ -78,25 +82,19 @@ export default function TabLayout() {
                 }}
             />
             <Tabs.Screen
-                name="settings"
+                name="leaves"
                 options={{
-                    title: 'Settings',
+                    title: 'Leaves',
                     tabBarIcon: ({ color, size }) => (
-                        <Icon name="settings" size={size} color={color} />
+                        <Icon name="calendar" size={size} color={color} />
                     ),
                 }}
             />
             {/* Hidden tabs - not shown in tab bar */}
             <Tabs.Screen
-                name="leaves"
-                options={{
-                    href: null, // Hide from tab bar
-                }}
-            />
-            <Tabs.Screen
                 name="shifts"
                 options={{
-                    href: null, // Hide from tab bar
+                    href: null,
                 }}
             />
         </Tabs>

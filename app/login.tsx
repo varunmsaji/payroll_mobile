@@ -35,8 +35,11 @@ export default function LoginScreen() {
         console.log('Attempting login for:', email.trim());
         const result = await login(email.trim(), password);
 
-        if (result.success) {
-            router.replace('/(tabs)/dashboard');
+        if (result.success && result.user) {
+            const { getRedirectPathForRole } = await import('../lib/auth');
+            const redirectPath = getRedirectPathForRole(result.user.role);
+            console.log('Redirecting to:', redirectPath);
+            router.replace(redirectPath as any);
         } else {
             setError(result.error || 'Login failed');
         }

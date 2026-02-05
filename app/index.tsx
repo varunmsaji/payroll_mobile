@@ -1,10 +1,10 @@
 import { Redirect } from 'expo-router';
-import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
-import { useAuth } from '../lib/auth';
+import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { useAuth, getRedirectPathForRole } from '../lib/auth';
 import { Colors } from '../constants/theme';
 
 export default function Index() {
-    const { isAuthenticated, isLoading } = useAuth();
+    const { isAuthenticated, isLoading, user } = useAuth();
 
     if (isLoading) {
         return (
@@ -14,8 +14,9 @@ export default function Index() {
         );
     }
 
-    if (isAuthenticated) {
-        return <Redirect href="/(tabs)/dashboard" />;
+    if (isAuthenticated && user) {
+        const redirectPath = getRedirectPathForRole(user.role);
+        return <Redirect href={redirectPath as any} />;
     }
 
     return <Redirect href="/login" />;
