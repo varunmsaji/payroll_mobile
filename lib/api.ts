@@ -161,6 +161,37 @@ export const apiClient = {
     dashboard: {
         overview: () => api.get('/hrms/admin/dashboard/overview'),
     },
+
+    // Face Registration
+    faces: {
+        onboard: (data: FormData) => api.post('/faces/onboard', data, {
+            headers: {
+                'Content-Type': 'multipart/form-data',
+            },
+        }),
+    },
+
+    // Face Attendance
+    faceAttendance: {
+        punch: (data: FormData, eventTime: string) =>
+            api.post('/face_attendance/punch', data, {
+                params: { event_time: eventTime },
+                headers: {
+                    'Content-Type': 'multipart/form-data',
+                },
+            }),
+        geoPunch: (data: FormData, eventTime: string, lat: number, lng: number) =>
+            api.post('/face_attendance/geo_punch', data, {
+                params: {
+                    event_time: eventTime,
+                    lat: lat.toString(),
+                    lng: lng.toString()
+                },
+                headers: {
+                    'Content-Type': 'multipart/form-data',
+                },
+            }),
+    },
 };
 
 export { api };

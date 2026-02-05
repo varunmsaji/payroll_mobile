@@ -7,14 +7,19 @@ import {
     ScrollView,
     RefreshControl,
     TouchableOpacity,
+    Alert,
+    Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import * as Location from 'expo-location';
 import { Icon } from '../../components/Icon';
 import { Colors, Spacing, Typography, BorderRadius } from '../../constants/theme';
 import { apiClient } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { Attendance, ShiftAssignment, Leave } from '../../types';
+import FaceCamera from '../../components/FaceCamera';
+import OnboardModal from '../../components/OnboardModal';
 
 interface EmployeeDashboardData {
     todayAttendance: Attendance | null;
@@ -39,6 +44,11 @@ export default function EmployeeHomeScreen() {
         pendingLeaves: 0,
     });
     const [isCheckedIn, setIsCheckedIn] = useState(false);
+
+    // Face Attendance State
+    const [showFaceCamera, setShowFaceCamera] = useState(false);
+    const [cameraPurpose, setCameraPurpose] = useState<'attendance' | 'geo_attendance'>('attendance');
+    const [showOnboardModal, setShowOnboardModal] = useState(false);
 
     const fetchData = useCallback(async () => {
         if (!user?.employee_id) return;
@@ -103,6 +113,8 @@ export default function EmployeeHomeScreen() {
     };
 
     const handleCheckOut = async () => {
+        // Standard check-out without face for now, or use same face logic if needed.
+        // For this task, we'll keep standard check-out but add face options to check-in.
         if (!user?.employee_id) return;
         try {
             await apiClient.attendance.checkOut(user.employee_id);
@@ -110,6 +122,51 @@ export default function EmployeeHomeScreen() {
             fetchData();
         } catch (error) {
             console.error('Check-out error:', error);
+        }
+    };
+
+    const handleFaceAttendanceTrigger = (type: 'attendance' | 'geo_attendance') => {
+        setCameraPurpose(type);
+        setShowFaceCamera(true);
+    };
+
+    const handleFaceCaptured = async (uri: string) => {
+        setShowFaceCamera(false);
+        if (!user?.employee_id) return;
+
+        try {
+            const formData = new FormData();
+            formData.append('file', {
+                uri: Platform.OS === 'android' ? uri : uri.replace('file://', ''),
+                name: 'attendance.jpg',
+                type: 'image/jpeg',
+            } as any);
+
+            const eventTime = new Date().toISOString();
+
+            if (cameraPurpose === 'geo_attendance') {
+                const { status } = await Location.requestForegroundPermissionsAsync();
+                if (status !== 'granted') {
+                    Alert.alert('Permission Denied', 'Location is required for Geo Attendance.');
+                    return;
+                }
+
+                const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+                await apiClient.faceAttendance.geoPunch(
+                    formData,
+                    eventTime,
+                    location.coords.latitude,
+                    location.coords.longitude
+                );
+            } else {
+                await apiClient.faceAttendance.punch(formData, eventTime);
+            }
+
+            Alert.alert('Success', 'Attendance marked successfully!');
+            fetchData();
+        } catch (error: any) {
+            console.error('Attendance error:', error);
+            Alert.alert('Error', error.response?.data?.message || 'Failed to mark attendance.');
         }
     };
 
@@ -173,6 +230,7 @@ export default function EmployeeHomeScreen() {
 
                 {/* Quick Actions */}
                 <View style={styles.actionsContainer}>
+                    {/* Standard Check-In/Out */}
                     <TouchableOpacity
                         style={[
                             styles.actionButton,
@@ -190,6 +248,38 @@ export default function EmployeeHomeScreen() {
                         </Text>
                     </TouchableOpacity>
 
+                    {/* Face Attendance Options - Only show when not checked in */}
+                    {!isCheckedIn && (
+                        <>
+                            <TouchableOpacity
+                                style={[styles.actionButton, styles.faceButton]}
+                                onPress={() => handleFaceAttendanceTrigger('attendance')}
+                            >
+                                <Icon name="camera" size={24} color={Colors.text.inverse} />
+                                <Text style={styles.actionButtonText}>Face In</Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                                style={[styles.actionButton, styles.geoButton]}
+                                onPress={() => handleFaceAttendanceTrigger('geo_attendance')}
+                            >
+                                <Icon name="map-pin" size={24} color={Colors.text.inverse} />
+                                <Text style={styles.actionButtonText}>Geo In</Text>
+                            </TouchableOpacity>
+                        </>
+                    )}
+                </View>
+
+                {/* Registration Button (Temporary for testing) */}
+                <TouchableOpacity
+                    style={[styles.actionButton, styles.registerButton, { marginBottom: Spacing.md }]}
+                    onPress={() => setShowOnboardModal(true)}
+                >
+                    <Icon name="user-plus" size={24} color={Colors.text.inverse} />
+                    <Text style={styles.actionButtonText}>Register Face</Text>
+                </TouchableOpacity>
+
+                <View style={[styles.actionsContainer, { marginTop: 0 }]}>
                     <TouchableOpacity
                         style={[styles.actionButton, styles.applyLeaveButton]}
                         onPress={() => router.push('/(employee)/my-leaves')}
@@ -266,7 +356,24 @@ export default function EmployeeHomeScreen() {
                     </TouchableOpacity>
                 </View>
             </ScrollView>
-        </SafeAreaView>
+
+            <FaceCamera
+                visible={showFaceCamera}
+                onCapture={handleFaceCaptured}
+                onClose={() => setShowFaceCamera(false)}
+                purpose={cameraPurpose}
+                instruction={cameraPurpose === 'geo_attendance' ? 'Capture Face & Location' : 'Capture Face for Attendance'}
+            />
+
+            <OnboardModal
+                visible={showOnboardModal}
+                onClose={() => setShowOnboardModal(false)}
+                onSuccess={() => {
+                    setShowOnboardModal(false);
+                    fetchData();
+                }}
+            />
+        </SafeAreaView >
     );
 }
 
@@ -366,6 +473,15 @@ const styles = StyleSheet.create({
         fontSize: Typography.size.sm,
         fontWeight: '600',
         color: Colors.text.inverse,
+    },
+    faceButton: {
+        backgroundColor: Colors.primary[500],
+    },
+    geoButton: {
+        backgroundColor: Colors.primary[700],
+    },
+    registerButton: {
+        backgroundColor: Colors.text.primary,
     },
     card: {
         backgroundColor: Colors.background.primary,

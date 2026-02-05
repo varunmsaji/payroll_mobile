@@ -46,7 +46,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         restoreAuth();
     }, []);
 
-    const login = useCallback(async (email: string, password: string) => {
+    const login = useCallback(async (email: string, password: string): Promise<{ success: boolean; user?: AuthUser; error?: string }> => {
         try {
             const response = await apiClient.auth.login(email, password);
             console.log('Login Response Data:', response.data);
@@ -69,7 +69,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             await storage.setUser(userData);
             setUser(userData);
 
-            return { success: true };
+            return { success: true, user: userData };
         } catch (error: any) {
             console.error('Login Error Detail:', error);
             const message = error.response?.data?.detail || 'Login failed. Please try again.';

@@ -2,12 +2,14 @@
 import React from 'react';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { Tabs, Redirect } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '../../components/Icon';
 import { Colors, Typography } from '../../constants/theme';
 import { useAuth } from '../../lib/auth';
 
 export default function HRLayout() {
     const { isAuthenticated, isLoading, user } = useAuth();
+    const insets = useSafeAreaInsets();
 
     if (isLoading) {
         return (
@@ -36,8 +38,8 @@ export default function HRLayout() {
                     backgroundColor: Colors.background.primary,
                     borderTopColor: Colors.border.light,
                     paddingTop: 8,
-                    paddingBottom: 8,
-                    height: 65,
+                    paddingBottom: Math.max(insets.bottom, 8),
+                    height: 65 + Math.max(insets.bottom - 8, 0),
                 },
                 tabBarLabelStyle: {
                     fontSize: Typography.size.xs,
