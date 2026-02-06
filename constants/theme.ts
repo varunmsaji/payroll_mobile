@@ -97,6 +97,8 @@ export const BorderRadius = {
     lg: 12,
     xl: 16,
     '2xl': 20,
+    '3xl': 24,
+    '4xl': 32,
     full: 9999,
 };
 

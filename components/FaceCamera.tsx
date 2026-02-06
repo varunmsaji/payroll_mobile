@@ -14,55 +14,88 @@ interface FaceCameraProps {
     onClose: () => void;
     purpose: 'attendance' | 'registration' | 'geo_attendance';
     instruction: string;
+    isSubmitting?: boolean;
 }
 
-export default function FaceCamera({ visible, onCapture, onClose, purpose, instruction }: FaceCameraProps) {
+export default function FaceCamera({ visible, onCapture, onClose, purpose, instruction, isSubmitting = false }: FaceCameraProps) {
     const [permission, requestPermission] = useCameraPermissions();
     const cameraRef = useRef<CameraView>(null);
     const [isCapturing, setIsCapturing] = useState(false);
     const [cameraReady, setCameraReady] = useState(false);
     const [facing, setFacing] = useState<CameraType>('front');
 
+    // Debug: log the state
+    console.log('[FaceCamera] visible:', visible, 'permission:', permission);
+
     useEffect(() => {
+        console.log('[FaceCamera] useEffect - visible:', visible, 'permission granted:', permission?.granted);
         if (visible && !permission?.granted) {
+            console.log('[FaceCamera] Requesting camera permission...');
             requestPermission();
         }
     }, [visible, permission]);
 
     const handleTakePhoto = async () => {
-        if (!cameraRef.current || isCapturing) return;
+        console.log('[FaceCamera] handleTakePhoto called');
+        console.log('[FaceCamera] cameraRef.current:', !!cameraRef.current);
+        console.log('[FaceCamera] isCapturing:', isCapturing);
+
+        if (!cameraRef.current || isCapturing) {
+            console.log('[FaceCamera] Returning early - camera not ready or already capturing');
+            return;
+        }
 
         try {
             setIsCapturing(true);
+            console.log('[FaceCamera] Taking picture...');
             const photo = await cameraRef.current.takePictureAsync({
                 quality: 0.7,
                 base64: false,
                 skipProcessing: true,
             });
 
+            console.log('[FaceCamera] Photo result:', photo);
             if (photo?.uri) {
+                console.log('[FaceCamera] Calling onCapture with URI:', photo.uri);
                 onCapture(photo.uri);
+            } else {
+                console.log('[FaceCamera] No photo URI received');
             }
         } catch (error) {
             Alert.alert('Error', 'Failed to capture photo. Please try again.');
-            console.error('Capture error:', error);
+            console.error('[FaceCamera] Capture error:', error);
         } finally {
             setIsCapturing(false);
         }
     };
 
-    if (!permission) {
-        return <View />;
+    // If modal is not visible, don't render anything
+    if (!visible) {
+        return null;
     }
 
-    if (!permission.granted) {
+    // Show loading or permission request inside the modal
+    if (!permission || !permission.granted) {
         return (
             <Modal visible={visible} animationType="slide" transparent>
                 <View style={styles.permissionContainer}>
-                    <Text style={styles.permissionText}>We need your permission to show the camera</Text>
-                    <TouchableOpacity onPress={requestPermission} style={styles.permissionButton}>
-                        <Text style={styles.permissionButtonText}>Grant Permission</Text>
-                    </TouchableOpacity>
+                    {!permission ? (
+                        // Still loading permission status
+                        <>
+                            <ActivityIndicator size="large" color={Colors.primary[600]} />
+                            <Text style={[styles.permissionText, { marginTop: Spacing.lg }]}>
+                                Checking camera permission...
+                            </Text>
+                        </>
+                    ) : (
+                        // Permission not granted
+                        <>
+                            <Text style={styles.permissionText}>We need your permission to show the camera</Text>
+                            <TouchableOpacity onPress={requestPermission} style={styles.permissionButton}>
+                                <Text style={styles.permissionButtonText}>Grant Permission</Text>
+                            </TouchableOpacity>
+                        </>
+                    )}
                     <TouchableOpacity onPress={onClose} style={styles.closeButton}>
                         <Text style={styles.closeButtonText}>Cancel</Text>
                     </TouchableOpacity>
@@ -121,8 +154,14 @@ export default function FaceCamera({ visible, onCapture, onClose, purpose, instr
                         </BlurView>
                     </View>
                 </CameraView>
+                {isSubmitting && (
+                    <View style={styles.loadingOverlay}>
+                        <ActivityIndicator size="large" color={Colors.primary[600]} />
+                        <Text style={styles.loadingText}>Verifying...</Text>
+                    </View>
+                )}
             </View>
-        </Modal>
+        </Modal >
     );
 }
 
@@ -242,5 +281,18 @@ const styles = StyleSheet.create({
         height: 64,
         borderRadius: 32,
         backgroundColor: Colors.text.inverse,
+    },
+    loadingOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(0,0,0,0.7)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        zIndex: 20,
+    },
+    loadingText: {
+        marginTop: Spacing.md,
+        color: Colors.text.inverse,
+        fontSize: Typography.size.lg,
+        fontWeight: '600',
     },
 });

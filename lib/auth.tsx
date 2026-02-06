@@ -28,9 +28,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 if (token && storedUser) {
                     // Validate token by calling /auth/me
                     try {
+                        console.log('[Auth] Validating token with /auth/me...');
                         const response = await apiClient.auth.me();
+                        console.log('[Auth] /auth/me response:', response.data);
                         setUser(response.data);
-                    } catch {
+                    } catch (err) {
+                        console.warn('[Auth] Token validation failed:', err);
                         // Token invalid, clear storage
                         await storage.clearAuth();
                     }
@@ -49,7 +52,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const login = useCallback(async (email: string, password: string): Promise<{ success: boolean; user?: AuthUser; error?: string }> => {
         try {
             const response = await apiClient.auth.login(email, password);
-            console.log('Login Response Data:', response.data);
+            console.log('[Auth] Login Response Data:', response.data);
 
             // Backend returns flat structure, map it to our User object
             const userData: AuthUser = {
@@ -57,6 +60,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 role: response.data.role,
                 employee_id: response.data.employee_id
             };
+
+            console.log('[Auth] Mapped UserData:', userData);
 
             const access_token = response.data.access_token;
             console.log('Constructed User Data:', userData);

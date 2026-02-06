@@ -1,5 +1,5 @@
-// Employee Home Screen - Personal dashboard
-import React, { useEffect, useState, useCallback } from 'react';
+// Employee Home Screen - Redesigned
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
     View,
     Text,
@@ -9,21 +9,26 @@ import {
     TouchableOpacity,
     Alert,
     Platform,
+    Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as Location from 'expo-location';
+import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Icon } from '../../components/Icon';
-import { Colors, Spacing, Typography, BorderRadius } from '../../constants/theme';
+import { Colors, Spacing, Typography, BorderRadius, Shadows } from '../../constants/theme';
 import { apiClient } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
-import { Attendance, ShiftAssignment, Leave } from '../../types';
+import { Attendance, EmployeeShiftDetails } from '../../types';
 import FaceCamera from '../../components/FaceCamera';
 import OnboardModal from '../../components/OnboardModal';
 
+const { width } = Dimensions.get('window');
+
 interface EmployeeDashboardData {
     todayAttendance: Attendance | null;
-    currentShift: ShiftAssignment | null;
+    currentShift: EmployeeShiftDetails | null;
     leaveBalance: {
         annual: number;
         sick: number;
@@ -40,15 +45,19 @@ export default function EmployeeHomeScreen() {
     const [data, setData] = useState<EmployeeDashboardData>({
         todayAttendance: null,
         currentShift: null,
-        leaveBalance: { annual: 20, sick: 10, personal: 5 },
+        leaveBalance: { annual: 20, sick: 10, personal: 5 }, // Mock data
         pendingLeaves: 0,
     });
     const [isCheckedIn, setIsCheckedIn] = useState(false);
+    const [duration, setDuration] = useState('0.0');
 
     // Face Attendance State
     const [showFaceCamera, setShowFaceCamera] = useState(false);
     const [cameraPurpose, setCameraPurpose] = useState<'attendance' | 'geo_attendance'>('attendance');
     const [showOnboardModal, setShowOnboardModal] = useState(false);
+
+    // Timer Ref
+    const timerRef = useRef<NodeJS.Timeout | null>(null);
 
     const fetchData = useCallback(async () => {
         if (!user?.employee_id) return;
@@ -58,32 +67,57 @@ export default function EmployeeHomeScreen() {
             const today = new Date().toISOString().split('T')[0];
 
             // Fetch today's attendance
-            const attendanceRes = await apiClient.attendance.list({
-                employee_id: user.employee_id,
-                date: today,
-            });
-            const todayAttendance = attendanceRes.data?.length > 0 ? attendanceRes.data[0] : null;
-            setIsCheckedIn(!!todayAttendance?.check_in && !todayAttendance?.check_out);
+            const attendanceRes = await apiClient.attendance.getToday(user.employee_id);
+            const todayAttendance = attendanceRes.data;
+
+            // Determine Check-in status
+            // If we have a check-in but NO check-out, we are currently checked in.
+            const isCheckedInNow = !!todayAttendance?.check_in && !todayAttendance?.check_out;
+            setIsCheckedIn(isCheckedInNow);
 
             // Fetch current shift assignment
-            const shiftRes = await apiClient.shifts.assignments.list({
-                employee_id: user.employee_id,
-            });
-            const currentShift = shiftRes.data?.length > 0 ? shiftRes.data[0] : null;
+            try {
+                const shiftRes = await apiClient.shifts.assignments.getEmployeeShift(user.employee_id);
+                console.log('Shift Data:', shiftRes.data);
+                // API returns the object directly, not an array
+                const currentShift = shiftRes.data;
 
-            // Fetch pending leaves
-            const leavesRes = await apiClient.leaves.list({
-                employee_id: user.employee_id,
-                status: 'pending',
-            });
+                // If the response is the object itself (as per curl output), use it. 
+                // We need to handle potential null/undefined if no shift is assigned.
+                setData(prev => ({ ...prev, currentShift: currentShift || null }));
+            } catch (err) {
+                console.error('Error fetching shift:', err);
+                // If error, set currentShift to null but don't fail everything
+                setData(prev => ({ ...prev, currentShift: null }));
+            }
+
+            // Fetch pending leaves count
+            const leavesRes = await apiClient.leaves.requests(user.employee_id, { status: 'pending' });
             const pendingLeaves = leavesRes.data?.length || 0;
 
-            setData({
+            // Fetch leave balances
+            const currentYear = new Date().getFullYear();
+            const balanceRes = await apiClient.leaves.getBalance(user.employee_id, currentYear);
+            console.log('[Home] Leave Balance:', balanceRes.data);
+
+            // Map balance data to our local state structure
+            const balances = { annual: 0, sick: 0, personal: 0 };
+            if (Array.isArray(balanceRes.data)) {
+                balanceRes.data.forEach((item: any) => {
+                    const typeName = item.leave_type_name?.toLowerCase() || '';
+                    if (typeName.includes('annual')) balances.annual = item.remaining;
+                    else if (typeName.includes('sick')) balances.sick = item.remaining;
+                    else if (typeName.includes('personal') || typeName.includes('casual')) balances.personal = item.remaining;
+                });
+            }
+
+            setData(prev => ({
+                ...prev,
                 todayAttendance,
-                currentShift,
-                leaveBalance: { annual: 20, sick: 10, personal: 5 }, // TODO: Get from API
+                // currentShift is already updated via its own setData call above
+                leaveBalance: balances,
                 pendingLeaves,
-            });
+            }));
         } catch (error) {
             console.error('Error fetching employee dashboard:', error);
         } finally {
@@ -93,80 +127,156 @@ export default function EmployeeHomeScreen() {
     }, [user?.employee_id]);
 
     useEffect(() => {
-        fetchData();
-    }, [fetchData]);
+        if (user?.employee_id) {
+            fetchData();
+        }
+    }, [fetchData, user?.employee_id]);
 
     const onRefresh = useCallback(() => {
         setRefreshing(true);
         fetchData();
     }, [fetchData]);
 
-    const handleCheckIn = async () => {
-        if (!user?.employee_id) return;
-        try {
-            await apiClient.attendance.checkIn(user.employee_id);
-            setIsCheckedIn(true);
-            fetchData();
-        } catch (error) {
-            console.error('Check-in error:', error);
-        }
-    };
+    // Duration Timer Logic
+    useEffect(() => {
+        const updateDuration = () => {
+            if (isCheckedIn && data.todayAttendance?.check_in) {
+                const start = new Date(data.todayAttendance.check_in).getTime();
+                const now = new Date().getTime();
+                const diffHrs = (now - start) / (1000 * 60 * 60);
+                setDuration(diffHrs.toFixed(1));
+            } else if (data.todayAttendance?.work_hours || data.todayAttendance?.net_hours) {
+                const hours = data.todayAttendance?.work_hours || data.todayAttendance?.net_hours || 0;
+                setDuration(hours.toFixed(1));
+            } else {
+                setDuration('0.0');
+            }
+        };
 
-    const handleCheckOut = async () => {
-        // Standard check-out without face for now, or use same face logic if needed.
-        // For this task, we'll keep standard check-out but add face options to check-in.
+        updateDuration(); // Initial call
+
+        if (isCheckedIn) {
+            timerRef.current = setInterval(updateDuration, 60000); // Update every minute
+        } else if (timerRef.current) {
+            clearInterval(timerRef.current);
+        }
+
+        return () => {
+            if (timerRef.current) clearInterval(timerRef.current);
+        };
+    }, [isCheckedIn, data.todayAttendance]);
+
+
+    const handleManualPunch = async () => {
         if (!user?.employee_id) return;
+
         try {
-            await apiClient.attendance.checkOut(user.employee_id);
-            setIsCheckedIn(false);
+            if (isCheckedIn) {
+                // Check Out
+                await apiClient.attendance.checkOut(user.employee_id);
+                Alert.alert('Success', 'Checked out successfully.');
+            } else {
+                // Check In
+                await apiClient.attendance.checkIn(user.employee_id);
+                Alert.alert('Success', 'Checked in successfully.');
+            }
             fetchData();
-        } catch (error) {
-            console.error('Check-out error:', error);
+        } catch (error: any) {
+            console.error('Manual punch error:', error);
+            Alert.alert('Error', error.response?.data?.message || 'Failed to update attendance.');
         }
     };
 
     const handleFaceAttendanceTrigger = (type: 'attendance' | 'geo_attendance') => {
+        console.log('[Home] handleFaceAttendanceTrigger called with type:', type);
         setCameraPurpose(type);
         setShowFaceCamera(true);
+        console.log('[Home] setShowFaceCamera(true) called');
     };
 
+    const [isMarkingAttendance, setIsMarkingAttendance] = useState(false);
+
     const handleFaceCaptured = async (uri: string) => {
-        setShowFaceCamera(false);
-        if (!user?.employee_id) return;
+        console.log('[handleFaceCaptured] Called with URI:', uri);
+        console.log('[handleFaceCaptured] User employee_id:', user?.employee_id);
+
+        if (!user?.employee_id) {
+            console.log('[handleFaceCaptured] No employee_id, returning early');
+            return;
+        }
+        setIsMarkingAttendance(true);
 
         try {
+            console.log('[handleFaceCaptured] Creating FormData...');
             const formData = new FormData();
+            const fileUri = Platform.OS === 'android' ? uri : uri.replace('file://', '');
+            console.log('[handleFaceCaptured] File URI for FormData:', fileUri);
+
             formData.append('file', {
-                uri: Platform.OS === 'android' ? uri : uri.replace('file://', ''),
+                uri: fileUri,
                 name: 'attendance.jpg',
                 type: 'image/jpeg',
             } as any);
 
             const eventTime = new Date().toISOString();
+            console.log('[handleFaceCaptured] Event time:', eventTime);
+            console.log('[handleFaceCaptured] Camera purpose:', cameraPurpose);
 
             if (cameraPurpose === 'geo_attendance') {
+                console.log('[handleFaceCaptured] Requesting location permission...');
                 const { status } = await Location.requestForegroundPermissionsAsync();
                 if (status !== 'granted') {
                     Alert.alert('Permission Denied', 'Location is required for Geo Attendance.');
+                    setIsMarkingAttendance(false);
                     return;
                 }
 
+                console.log('[handleFaceCaptured] Getting current position...');
                 const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-                await apiClient.faceAttendance.geoPunch(
+                console.log('[handleFaceCaptured] Location:', location.coords);
+
+                console.log('[handleFaceCaptured] Calling geoPunch API...');
+                const response = await apiClient.faceAttendance.geoPunch(
                     formData,
                     eventTime,
                     location.coords.latitude,
                     location.coords.longitude
                 );
+                console.log('[handleFaceCaptured] geoPunch API response:', response.data);
             } else {
-                await apiClient.faceAttendance.punch(formData, eventTime);
+                console.log('[handleFaceCaptured] Calling face_attendance/punch API...');
+                const response = await apiClient.faceAttendance.punch(formData, eventTime);
+                console.log('[handleFaceCaptured] punch API response:', response.data);
             }
 
-            Alert.alert('Success', 'Attendance marked successfully!');
-            fetchData();
+            console.log('[handleFaceCaptured] Success! Showing alert...');
+            Alert.alert('Success', 'Attendance marked successfully!', [
+                {
+                    text: 'OK',
+                    onPress: () => {
+                        setShowFaceCamera(false);
+                        fetchData();
+                    }
+                }
+            ]);
         } catch (error: any) {
-            console.error('Attendance error:', error);
-            Alert.alert('Error', error.response?.data?.message || 'Failed to mark attendance.');
+            console.log('[handleFaceCaptured] Request failed:', error.message);
+            console.log('[handleFaceCaptured] Error response:', error.response?.data);
+            console.log('[handleFaceCaptured] Error status:', error.response?.status);
+
+            // Check for specific 400 error (e.g. Late check-in not allowed)
+            if (error.response?.status === 400) {
+                const message = error.response?.data?.detail || error.response?.data?.message || 'Attendance request rejected.';
+                Alert.alert('Attendance Alert', message, [{ text: 'OK' }]);
+            } else {
+                Alert.alert(
+                    'Attendance Failed',
+                    error.response?.data?.detail || error.response?.data?.message || 'Failed to mark attendance. Please try again.',
+                    [{ text: 'Try Again' }]
+                );
+            }
+        } finally {
+            setIsMarkingAttendance(false);
         }
     };
 
@@ -174,9 +284,14 @@ export default function EmployeeHomeScreen() {
         if (!timeString) return '--:--';
         return new Date(timeString).toLocaleTimeString([], {
             hour: '2-digit',
-            minute: '2-digit'
+            minute: '2-digit',
+            hour12: false
         });
     };
+
+    const currentDate = new Date().toLocaleDateString('en-US', {
+        weekday: 'short', month: 'short', day: 'numeric'
+    });
 
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
@@ -186,183 +301,205 @@ export default function EmployeeHomeScreen() {
                 refreshControl={
                     <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
                 }
+                showsVerticalScrollIndicator={false}
             >
                 {/* Header */}
                 <View style={styles.header}>
                     <View>
+                        <Text style={styles.dateText}>{currentDate}</Text>
                         <Text style={styles.greeting}>Welcome back,</Text>
-                        <Text style={styles.userName}>Employee</Text>
+                        <Text style={styles.userName}>{user?.first_name || 'Employee'} {user?.last_name || ''}</Text>
                     </View>
-                    <TouchableOpacity onPress={logout} style={styles.logoutButton}>
-                        <Icon name="logout" size={24} color={Colors.text.secondary} />
-                    </TouchableOpacity>
+                    <View style={styles.profileContainer}>
+                        <Image
+                            source={{ uri: `https://api.dicebear.com/7.x/avataaars/png?seed=${user?.first_name || 'User'}` }}
+                            style={styles.avatar}
+                        />
+                        <View style={styles.onlineBadge} />
+                    </View>
                 </View>
 
                 {/* Today's Status Card */}
                 <View style={styles.statusCard}>
-                    <Text style={styles.sectionTitle}>Today's Status</Text>
-                    <View style={styles.statusRow}>
-                        <View style={styles.statusItem}>
-                            <Icon name="clock" size={20} color={Colors.primary[600]} />
-                            <Text style={styles.statusLabel}>Check In</Text>
-                            <Text style={styles.statusValue}>
+                    <View style={styles.statusHeader}>
+                        <View>
+                            <Text style={styles.statusTitle}>Today's Status</Text>
+                            <Text style={styles.shiftText}>
+                                {data.currentShift?.shift_name || 'Regular Shift'} • {data.currentShift?.start_time || '09:00'} - {data.currentShift?.end_time || '17:00'}
+                            </Text>
+                        </View>
+                        <View style={styles.calendarIconBg}>
+                            <Icon name="calendar" size={24} color={Colors.primary[600]} />
+                        </View>
+                    </View>
+
+                    <View style={styles.statusMetrics}>
+                        <View style={styles.metricItem}>
+                            <Text style={styles.metricLabel}>CHECK IN</Text>
+                            <Text style={[styles.metricValue, isCheckedIn ? styles.textPrimary : styles.textInactive]}>
                                 {formatTime(data.todayAttendance?.check_in)}
                             </Text>
                         </View>
-                        <View style={styles.statusDivider} />
-                        <View style={styles.statusItem}>
-                            <Icon name="clock" size={20} color={Colors.accent.orange} />
-                            <Text style={styles.statusLabel}>Check Out</Text>
-                            <Text style={styles.statusValue}>
+                        <View style={styles.metricDivider} />
+                        <View style={styles.metricItem}>
+                            <Text style={styles.metricLabel}>CHECK OUT</Text>
+                            <Text style={[styles.metricValue, !isCheckedIn && data.todayAttendance?.check_out ? styles.textPrimary : styles.textInactive]}>
                                 {formatTime(data.todayAttendance?.check_out)}
                             </Text>
                         </View>
-                        <View style={styles.statusDivider} />
-                        <View style={styles.statusItem}>
-                            <Icon name="clock" size={20} color={Colors.accent.green} />
-                            <Text style={styles.statusLabel}>Hours</Text>
-                            <Text style={styles.statusValue}>
-                                {data.todayAttendance?.work_hours?.toFixed(1) || '0.0'}h
-                            </Text>
+                        <View style={styles.metricDivider} />
+                        <View style={[styles.metricItem, { alignItems: 'flex-end' }]}>
+                            <Text style={styles.metricLabel}>DURATION</Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+                                <Text style={styles.metricValuePrimary}>{duration}</Text>
+                                <Text style={styles.metricUnit}>h</Text>
+                            </View>
                         </View>
                     </View>
                 </View>
 
-                {/* Quick Actions */}
-                <View style={styles.actionsContainer}>
-                    {/* Standard Check-In/Out */}
-                    <TouchableOpacity
-                        style={[
-                            styles.actionButton,
-                            isCheckedIn ? styles.checkOutButton : styles.checkInButton,
-                        ]}
-                        onPress={isCheckedIn ? handleCheckOut : handleCheckIn}
-                    >
+                {/* Manual Punch Button */}
+                <TouchableOpacity
+                    style={[
+                        styles.punchButton,
+                        isCheckedIn ? styles.punchButtonOut : styles.punchButtonIn
+                    ]}
+                    onPress={handleManualPunch}
+                    activeOpacity={0.9}
+                >
+                    <LinearGradient
+                        colors={isCheckedIn
+                            ? ['rgba(255,255,255,0.2)', 'transparent']
+                            : ['rgba(255,255,255,0.2)', 'transparent']
+                        }
+                        style={StyleSheet.absoluteFill}
+                    />
+                    <View style={styles.punchIconCircle}>
                         <Icon
-                            name={isCheckedIn ? 'logout' : 'clock'}
-                            size={24}
+                            name={isCheckedIn ? 'clock' : 'clock'}
+                            size={28}
                             color={Colors.text.inverse}
                         />
-                        <Text style={styles.actionButtonText}>
-                            {isCheckedIn ? 'Check Out' : 'Check In'}
-                        </Text>
-                    </TouchableOpacity>
-
-                    {/* Face Attendance Options - Only show when not checked in */}
-                    {!isCheckedIn && (
-                        <>
-                            <TouchableOpacity
-                                style={[styles.actionButton, styles.faceButton]}
-                                onPress={() => handleFaceAttendanceTrigger('attendance')}
-                            >
-                                <Icon name="camera" size={24} color={Colors.text.inverse} />
-                                <Text style={styles.actionButtonText}>Face In</Text>
-                            </TouchableOpacity>
-
-                            <TouchableOpacity
-                                style={[styles.actionButton, styles.geoButton]}
-                                onPress={() => handleFaceAttendanceTrigger('geo_attendance')}
-                            >
-                                <Icon name="map-pin" size={24} color={Colors.text.inverse} />
-                                <Text style={styles.actionButtonText}>Geo In</Text>
-                            </TouchableOpacity>
-                        </>
-                    )}
-                </View>
-
-                {/* Registration Button (Temporary for testing) */}
-                <TouchableOpacity
-                    style={[styles.actionButton, styles.registerButton, { marginBottom: Spacing.md }]}
-                    onPress={() => setShowOnboardModal(true)}
-                >
-                    <Icon name="user-plus" size={24} color={Colors.text.inverse} />
-                    <Text style={styles.actionButtonText}>Register Face</Text>
+                    </View>
+                    <Text style={styles.punchButtonText}>
+                        {isCheckedIn ? 'Punch Out' : 'Punch In'}
+                    </Text>
                 </TouchableOpacity>
 
-                <View style={[styles.actionsContainer, { marginTop: 0 }]}>
+                {/* Attendance Actions Grid */}
+                <View style={styles.gridContainer}>
                     <TouchableOpacity
-                        style={[styles.actionButton, styles.applyLeaveButton]}
-                        onPress={() => router.push('/(employee)/my-leaves')}
+                        style={[styles.gridButton, styles.bgBlue]}
+                        onPress={() => handleFaceAttendanceTrigger('attendance')}
                     >
-                        <Icon name="calendar" size={24} color={Colors.text.inverse} />
-                        <Text style={styles.actionButtonText}>Apply Leave</Text>
+                        <Icon name="camera" size={28} color={Colors.text.inverse} />
+                        <Text style={styles.gridButtonText}>Face Attendance</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                        style={[styles.gridButton, styles.bgIndigo]}
+                        onPress={() => handleFaceAttendanceTrigger('geo_attendance')}
+                    >
+                        <Icon name="map-pin" size={28} color={Colors.text.inverse} />
+                        <Text style={styles.gridButtonText}>Geo Attendance</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                        style={[styles.gridButtonFull, styles.registerButton]}
+                        onPress={() => setShowOnboardModal(true)}
+                    >
+                        <Icon name="user-plus" size={24} color={Colors.text.secondary} />
+                        <Text style={styles.registerButtonText}>Register Face</Text>
                     </TouchableOpacity>
                 </View>
 
                 {/* Leave Balance */}
-                <View style={styles.card}>
-                    <Text style={styles.sectionTitle}>Leave Balance</Text>
-                    <View style={styles.leaveBalanceRow}>
+                <View style={styles.sectionCard}>
+                    <View style={styles.sectionHeader}>
+                        <Text style={styles.sectionTitle}>Leave Balance</Text>
+                        <TouchableOpacity onPress={() => router.push('/(employee)/my-leaves')}>
+                            <Text style={styles.linkText}>View All</Text>
+                        </TouchableOpacity>
+                    </View>
+
+                    <View style={styles.leaveRow}>
                         <View style={styles.leaveItem}>
-                            <Text style={styles.leaveCount}>{data.leaveBalance.annual}</Text>
+                            <Text style={styles.leaveValue}>{data.leaveBalance.annual}</Text>
                             <Text style={styles.leaveLabel}>Annual</Text>
                         </View>
+                        <View style={styles.verticalDivider} />
                         <View style={styles.leaveItem}>
-                            <Text style={styles.leaveCount}>{data.leaveBalance.sick}</Text>
+                            <Text style={styles.leaveValue}>{data.leaveBalance.sick}</Text>
                             <Text style={styles.leaveLabel}>Sick</Text>
                         </View>
+                        <View style={styles.verticalDivider} />
                         <View style={styles.leaveItem}>
-                            <Text style={styles.leaveCount}>{data.leaveBalance.personal}</Text>
+                            {data.pendingLeaves > 0 && (
+                                <View style={styles.badgeContainer}>
+                                    <Text style={styles.badgeText}>{data.pendingLeaves} Pending</Text>
+                                </View>
+                            )}
+                            <Text style={styles.leaveValue}>{data.leaveBalance.personal}</Text>
                             <Text style={styles.leaveLabel}>Personal</Text>
                         </View>
                     </View>
-                    {data.pendingLeaves > 0 && (
-                        <View style={styles.pendingBadge}>
-                            <Text style={styles.pendingText}>
-                                {data.pendingLeaves} pending request{data.pendingLeaves > 1 ? 's' : ''}
-                            </Text>
-                        </View>
-                    )}
                 </View>
-
-                {/* Current Shift */}
-                {data.currentShift && (
-                    <View style={styles.card}>
-                        <Text style={styles.sectionTitle}>Current Shift</Text>
-                        <View style={styles.shiftInfo}>
-                            <Icon name="clock" size={20} color={Colors.primary[600]} />
-                            <Text style={styles.shiftName}>
-                                {data.currentShift.shift_name || 'Regular Shift'}
-                            </Text>
-                        </View>
-                    </View>
-                )}
 
                 {/* Quick Links */}
-                <View style={styles.quickLinks}>
-                    <TouchableOpacity
-                        style={styles.quickLink}
-                        onPress={() => router.push('/(employee)/my-attendance')}
-                    >
-                        <Icon name="calendar" size={20} color={Colors.primary[600]} />
-                        <Text style={styles.quickLinkText}>View Attendance</Text>
-                        <Icon name="chevron-right" size={16} color={Colors.text.tertiary} />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        style={styles.quickLink}
-                        onPress={() => router.push('/(employee)/my-payslips')}
-                    >
-                        <Icon name="wallet" size={20} color={Colors.primary[600]} />
-                        <Text style={styles.quickLinkText}>View Payslips</Text>
-                        <Icon name="chevron-right" size={16} color={Colors.text.tertiary} />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        style={styles.quickLink}
-                        onPress={() => router.push('/(employee)/my-shift')}
-                    >
-                        <Icon name="clock" size={20} color={Colors.primary[600]} />
-                        <Text style={styles.quickLinkText}>View Shift Details</Text>
-                        <Icon name="chevron-right" size={16} color={Colors.text.tertiary} />
-                    </TouchableOpacity>
+                <View style={styles.quickLinksContainer}>
+                    <Text style={styles.linksTitle}>Quick Links</Text>
+                    <View style={styles.linksList}>
+                        <TouchableOpacity style={styles.linkRow} onPress={() => router.push('/(employee)/my-attendance')}>
+                            <View style={[styles.linkIconBg, { backgroundColor: Colors.primary[50] }]}>
+                                <Icon name="calendar" size={20} color={Colors.primary[600]} />
+                            </View>
+                            <View style={styles.linkContent}>
+                                <Text style={styles.linkTitle}>Attendance History</Text>
+                                <Text style={styles.linkSubtitle}>View past records</Text>
+                            </View>
+                            <Icon name="chevron-right" size={20} color={Colors.text.tertiary} />
+                        </TouchableOpacity>
+
+                        <View style={styles.separator} />
+
+                        <TouchableOpacity style={styles.linkRow} onPress={() => router.push('/(employee)/my-payslips')}>
+                            <View style={[styles.linkIconBg, { backgroundColor: Colors.success.light }]}>
+                                <Icon name="wallet" size={20} color={Colors.success.dark} />
+                            </View>
+                            <View style={styles.linkContent}>
+                                <Text style={styles.linkTitle}>Payslips</Text>
+                                <Text style={styles.linkSubtitle}>Download PDFs</Text>
+                            </View>
+                            <Icon name="chevron-right" size={20} color={Colors.text.tertiary} />
+                        </TouchableOpacity>
+
+                        <View style={styles.separator} />
+
+                        <TouchableOpacity style={styles.linkRow} onPress={() => router.push('/(employee)/my-shift')}>
+                            <View style={[styles.linkIconBg, { backgroundColor: Colors.warning.light }]}>
+                                <Icon name="clock" size={20} color={Colors.warning.dark} />
+                            </View>
+                            <View style={styles.linkContent}>
+                                <Text style={styles.linkTitle}>Shift Details</Text>
+                                <Text style={styles.linkSubtitle}>Upcoming schedule</Text>
+                            </View>
+                            <Icon name="chevron-right" size={20} color={Colors.text.tertiary} />
+                        </TouchableOpacity>
+                    </View>
                 </View>
+
+                {/* Add some bottom padding */}
+                <View style={{ height: Spacing['4xl'] }} />
+
             </ScrollView>
 
             <FaceCamera
                 visible={showFaceCamera}
                 onCapture={handleFaceCaptured}
-                onClose={() => setShowFaceCamera(false)}
+                onClose={() => !isMarkingAttendance && setShowFaceCamera(false)}
                 purpose={cameraPurpose}
                 instruction={cameraPurpose === 'geo_attendance' ? 'Capture Face & Location' : 'Capture Face for Attendance'}
+                isSubmitting={isMarkingAttendance}
             />
 
             <OnboardModal
@@ -373,7 +510,7 @@ export default function EmployeeHomeScreen() {
                     fetchData();
                 }}
             />
-        </SafeAreaView >
+        </SafeAreaView>
     );
 }
 
@@ -386,175 +523,332 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     content: {
-        padding: Spacing.md,
+        padding: Spacing.xl,
+        gap: Spacing.xl,
     },
+    // Header
     header: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+    },
+    dateText: {
+        fontSize: Typography.size.sm,
+        color: Colors.text.tertiary,
+        fontWeight: '500',
+        marginBottom: 2,
+    },
+    greeting: {
+        fontSize: Typography.size.lg,
+        fontWeight: '700',
+        color: Colors.text.primary,
+        lineHeight: 28,
+    },
+    userName: {
+        fontSize: Typography.size.lg,
+        fontWeight: '700',
+        color: Colors.text.primary,
+        lineHeight: 28,
+    },
+    profileContainer: {
+        position: 'relative',
+    },
+    avatar: {
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        borderWidth: 2,
+        borderColor: Colors.background.primary,
+        backgroundColor: Colors.border.light,
+    },
+    onlineBadge: {
+        position: 'absolute',
+        bottom: 0,
+        right: 0,
+        width: 14,
+        height: 14,
+        backgroundColor: Colors.success.main,
+        borderRadius: 7,
+        borderWidth: 2,
+        borderColor: Colors.background.primary,
+    },
+
+    // Status Card
+    statusCard: {
+        backgroundColor: Colors.background.primary,
+        borderRadius: BorderRadius['3xl'],
+        padding: Spacing.xl,
+        ...Shadows.sm,
+        borderWidth: 1,
+        borderColor: Colors.border.light,
+    },
+    statusHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
+        marginBottom: Spacing.lg,
+    },
+    statusTitle: {
+        fontSize: Typography.size.lg,
+        fontWeight: '700',
+        color: Colors.text.primary,
+    },
+    shiftText: {
+        fontSize: Typography.size.sm,
+        color: Colors.text.secondary,
+        fontWeight: '500',
+        marginTop: 4,
+    },
+    calendarIconBg: {
+        backgroundColor: Colors.primary[50], // primary/10
+        padding: Spacing.sm,
+        borderRadius: BorderRadius.lg,
+    },
+    statusMetrics: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    metricItem: {
+        flex: 1,
+        gap: 4,
+    },
+    metricLabel: {
+        fontSize: 10,
+        fontWeight: '600',
+        color: Colors.text.tertiary,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+    },
+    metricValue: {
+        fontSize: Typography.size['2xl'],
+        fontWeight: '700',
+        fontVariant: ['tabular-nums'],
+    },
+    metricValuePrimary: {
+        fontSize: Typography.size['2xl'],
+        fontWeight: '700',
+        color: Colors.text.primary,
+        fontVariant: ['tabular-nums'],
+    },
+    textPrimary: {
+        color: Colors.text.primary,
+    },
+    textInactive: {
+        color: Colors.text.tertiary,
+    },
+    metricUnit: {
+        fontSize: Typography.size.sm,
+        color: Colors.text.tertiary,
+        marginLeft: 2,
+        marginBottom: 4,
+    },
+    metricDivider: {
+        width: 1,
+        height: '80%',
+        backgroundColor: Colors.border.light,
+        marginHorizontal: Spacing.md,
+    },
+
+    // Punch Button
+    punchButton: {
+        borderRadius: BorderRadius['2xl'],
+        padding: Spacing.lg,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: Spacing.md,
+        ...Shadows.md,
+        overflow: 'hidden',
+        height: 72,
+    },
+    punchButtonIn: {
+        backgroundColor: Colors.accent.green, // Emerald 500 equivalent
+        shadowColor: Colors.accent.green,
+    },
+    punchButtonOut: {
+        backgroundColor: Colors.accent.red, // Rose 500 equivalent
+        shadowColor: Colors.accent.red,
+    },
+    punchIconCircle: {
+        backgroundColor: 'rgba(255,255,255,0.2)',
+        padding: 8,
+        borderRadius: BorderRadius.full,
+    },
+    punchButtonText: {
+        color: Colors.text.inverse,
+        fontSize: Typography.size.xl,
+        fontWeight: '700',
+        letterSpacing: 0.5,
+    },
+
+    // Grid Actions
+    gridContainer: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: Spacing.md,
+    },
+    gridButton: {
+        flex: 1,
+        minWidth: (width - 64) / 2, // 2 columns accounting for padding (32*2)
+        borderRadius: BorderRadius['2xl'],
+        padding: Spacing.lg,
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: Spacing.sm,
+        height: 100,
+        ...Shadows.md,
+    },
+    gridButtonFull: {
+        width: '100%',
+        borderRadius: BorderRadius['2xl'],
+        padding: Spacing.lg,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: Spacing.md,
+        height: 56,
+    },
+    bgBlue: {
+        backgroundColor: '#3B82F6', // Blue 500
+        shadowColor: '#3B82F6',
+    },
+    bgIndigo: {
+        backgroundColor: Colors.primary[600],
+        shadowColor: Colors.primary[600],
+    },
+    gridButtonText: {
+        color: Colors.text.inverse,
+        fontSize: 10,
+        fontWeight: '700',
+        textTransform: 'uppercase',
+        textAlign: 'center',
+    },
+    registerButton: {
+        backgroundColor: Colors.background.primary,
+        borderWidth: 2,
+        borderColor: Colors.border.light,
+        borderStyle: 'dashed',
+    },
+    registerButtonText: {
+        color: Colors.text.secondary,
+        fontSize: Typography.size.sm,
+        fontWeight: '700',
+    },
+
+    // Section Card (Leave Balance)
+    sectionCard: {
+        backgroundColor: Colors.background.primary,
+        borderRadius: BorderRadius['3xl'],
+        padding: Spacing.lg,
+        ...Shadows.sm,
+        borderWidth: 1,
+        borderColor: Colors.border.light,
+    },
+    sectionHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
         marginBottom: Spacing.lg,
     },
-    greeting: {
-        fontSize: Typography.size.sm,
-        color: Colors.text.secondary,
-    },
-    userName: {
-        fontSize: Typography.size.xl,
+    sectionTitle: {
+        fontSize: Typography.size.md,
         fontWeight: '700',
         color: Colors.text.primary,
     },
-    logoutButton: {
-        padding: Spacing.sm,
-    },
-    statusCard: {
-        backgroundColor: Colors.background.primary,
-        borderRadius: BorderRadius.lg,
-        padding: Spacing.lg,
-        marginBottom: Spacing.md,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.05,
-        shadowRadius: 8,
-        elevation: 2,
-    },
-    sectionTitle: {
-        fontSize: Typography.size.md,
-        fontWeight: '600',
-        color: Colors.text.primary,
-        marginBottom: Spacing.md,
-    },
-    statusRow: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-    },
-    statusItem: {
-        flex: 1,
-        alignItems: 'center',
-    },
-    statusDivider: {
-        width: 1,
-        backgroundColor: Colors.border.light,
-    },
-    statusLabel: {
+    linkText: {
         fontSize: Typography.size.xs,
-        color: Colors.text.secondary,
-        marginTop: Spacing.xs,
-    },
-    statusValue: {
-        fontSize: Typography.size.lg,
-        fontWeight: '600',
-        color: Colors.text.primary,
-        marginTop: Spacing.xs,
-    },
-    actionsContainer: {
-        flexDirection: 'row',
-        gap: Spacing.sm,
-        marginBottom: Spacing.md,
-    },
-    actionButton: {
-        flex: 1,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: Spacing.sm,
-        paddingVertical: Spacing.md,
-        borderRadius: BorderRadius.md,
-    },
-    checkInButton: {
-        backgroundColor: Colors.accent.green,
-    },
-    checkOutButton: {
-        backgroundColor: Colors.accent.orange,
-    },
-    applyLeaveButton: {
-        backgroundColor: Colors.primary[600],
-    },
-    actionButtonText: {
-        fontSize: Typography.size.sm,
-        fontWeight: '600',
-        color: Colors.text.inverse,
-    },
-    faceButton: {
-        backgroundColor: Colors.primary[500],
-    },
-    geoButton: {
-        backgroundColor: Colors.primary[700],
-    },
-    registerButton: {
-        backgroundColor: Colors.text.primary,
-    },
-    card: {
-        backgroundColor: Colors.background.primary,
-        borderRadius: BorderRadius.lg,
-        padding: Spacing.lg,
-        marginBottom: Spacing.md,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.05,
-        shadowRadius: 8,
-        elevation: 2,
-    },
-    leaveBalanceRow: {
-        flexDirection: 'row',
-        justifyContent: 'space-around',
-    },
-    leaveItem: {
-        alignItems: 'center',
-    },
-    leaveCount: {
-        fontSize: Typography.size.xxl,
         fontWeight: '700',
         color: Colors.primary[600],
     },
-    leaveLabel: {
-        fontSize: Typography.size.sm,
-        color: Colors.text.secondary,
-        marginTop: Spacing.xs,
-    },
-    pendingBadge: {
-        backgroundColor: Colors.accent.orange + '20',
-        paddingVertical: Spacing.xs,
-        paddingHorizontal: Spacing.sm,
-        borderRadius: BorderRadius.sm,
-        alignSelf: 'center',
-        marginTop: Spacing.md,
-    },
-    pendingText: {
-        fontSize: Typography.size.xs,
-        color: Colors.accent.orange,
-        fontWeight: '500',
-    },
-    shiftInfo: {
+    leaveRow: {
         flexDirection: 'row',
+        justifyContent: 'space-between',
         alignItems: 'center',
-        gap: Spacing.sm,
     },
-    shiftName: {
-        fontSize: Typography.size.md,
-        color: Colors.text.primary,
-        fontWeight: '500',
-    },
-    quickLinks: {
-        backgroundColor: Colors.background.primary,
-        borderRadius: BorderRadius.lg,
-        overflow: 'hidden',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.05,
-        shadowRadius: 8,
-        elevation: 2,
-    },
-    quickLink: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        padding: Spacing.md,
-        borderBottomWidth: 1,
-        borderBottomColor: Colors.border.light,
-    },
-    quickLinkText: {
+    leaveItem: {
         flex: 1,
-        fontSize: Typography.size.sm,
+        alignItems: 'center',
+        position: 'relative',
+    },
+    leaveValue: {
+        fontSize: Typography.size['2xl'],
+        fontWeight: '800',
         color: Colors.text.primary,
-        marginLeft: Spacing.sm,
+    },
+    leaveLabel: {
+        fontSize: Typography.size.xs,
+        fontWeight: '500',
+        color: Colors.text.secondary,
+    },
+    verticalDivider: {
+        width: 1,
+        height: 32,
+        backgroundColor: Colors.border.light,
+    },
+    badgeContainer: {
+        position: 'absolute',
+        top: -12,
+        right: 0,
+        backgroundColor: Colors.accent.red,
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: BorderRadius.full,
+        borderWidth: 2,
+        borderColor: Colors.background.primary,
+        zIndex: 1,
+    },
+    badgeText: {
+        color: Colors.text.inverse,
+        fontSize: 9,
+        fontWeight: '700',
+    },
+
+    // Quick Links
+    quickLinksContainer: {
+        gap: Spacing.md,
+    },
+    linksTitle: {
+        fontSize: Typography.size.md,
+        fontWeight: '700',
+        color: Colors.text.primary,
+        paddingHorizontal: Spacing.xs,
+    },
+    linksList: {
+        backgroundColor: Colors.background.primary,
+        borderRadius: BorderRadius['2xl'],
+        borderWidth: 1,
+        borderColor: Colors.border.light,
+        ...Shadows.sm,
+        overflow: 'hidden',
+    },
+    linkRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: Spacing.lg,
+    },
+    linkIconBg: {
+        width: 40,
+        height: 40,
+        borderRadius: BorderRadius.full,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    linkContent: {
+        flex: 1,
+        marginLeft: Spacing.md,
+    },
+    linkTitle: {
+        fontSize: Typography.size.sm,
+        fontWeight: '700',
+        color: Colors.text.primary,
+    },
+    linkSubtitle: {
+        fontSize: Typography.size.xs,
+        color: Colors.text.secondary,
+    },
+    separator: {
+        height: 1,
+        backgroundColor: Colors.border.light,
+        marginLeft: 72, // Align with text
     },
 });
