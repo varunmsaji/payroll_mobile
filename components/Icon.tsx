@@ -62,7 +62,14 @@ const iconMap: Record<string, keyof typeof MaterialCommunityIcons.glyphMap> = {
     'dots-vertical': 'dots-vertical',
     'eye': 'eye',
     'eye-off': 'eye-off',
-    'construction': 'hammer-wrench',
+    'x': 'close',
+    'refresh-cw': 'refresh',
+    'map-pin': 'map-marker',
+    'user-plus': 'account-plus',
+    'camera': 'camera', // Ensure camera is mapped if used
+    'lock': 'lock',
+    'server': 'server',
+    'database': 'database',
 };
 
 interface IconProps {

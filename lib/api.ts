@@ -71,89 +71,93 @@ export const apiClient = {
     // Employees
     employees: {
         list: (params?: { page?: number; per_page?: number; search?: string; status?: string }) =>
-            api.get('/employees', { params }),
-        get: (id: number) => api.get(`/employees/${id}`),
-        create: (data: any) => api.post('/employees', data),
-        update: (id: number, data: any) => api.put(`/employees/${id}`, data),
-        delete: (id: number) => api.delete(`/employees/${id}`),
+            api.get('/hrms/employees', { params }),
+        get: (id: number) => api.get(`/hrms/employees/${id}`),
+        create: (data: any) => api.post('/hrms/employees', data),
+        update: (id: number, data: any) => api.put(`/hrms/employees/${id}`, data),
+        delete: (id: number) => api.delete(`/hrms/employees/${id}`),
         updateManager: (id: number, managerId: number | null) =>
-            api.patch(`/employees/${id}/manager`, { manager_id: managerId }),
+            api.patch(`/hrms/employees/${id}/manager`, { manager_id: managerId }),
     },
 
     // Attendance
     attendance: {
         list: (params?: { date?: string; employee_id?: number; status?: string }) =>
-            api.get('/attendance', { params }),
-        get: (id: number) => api.get(`/attendance/${id}`),
-        checkIn: (employeeId: number) => api.post(`/attendance/check-in/${employeeId}`),
-        checkOut: (employeeId: number) => api.post(`/attendance/check-out/${employeeId}`),
-        update: (id: number, data: any) => api.put(`/attendance/${id}`, data),
-        bulkUpdate: (data: any[]) => api.post('/attendance/bulk-update', { records: data }),
+            api.get('/hrms/attendance', { params }),
+        get: (id: number) => api.get(`/hrms/attendance/${id}`),
+        checkIn: (employeeId: number) => api.post(`/hrms/attendance/check-in/${employeeId}`),
+        checkOut: (employeeId: number) => api.post(`/hrms/attendance/check-out/${employeeId}`),
+        update: (id: number, data: any) => api.put(`/hrms/attendance/${id}`, data),
+        bulkUpdate: (data: any[]) => api.post('/hrms/attendance/bulk-update', { records: data }),
+        getToday: (employeeId: number) => api.get(`/hrms/attendance/employee/${employeeId}/today`),
     },
 
     // Leaves
     leaves: {
         list: (params?: { status?: string; employee_id?: number }) =>
-            api.get('/leaves', { params }),
-        get: (id: number) => api.get(`/leaves/${id}`),
-        create: (data: any) => api.post('/leaves', data),
+            api.get('/hrms/leaves', { params }),
+        get: (id: number) => api.get(`/hrms/leaves/${id}`),
+        create: (data: any) => api.post('/hrms/leaves', data),
         approve: (id: number, approverId: number) =>
-            api.post(`/leaves/${id}/approve`, { approver_id: approverId }),
+            api.post(`/hrms/leaves/${id}/approve`, { approver_id: approverId }),
         reject: (id: number, reason: string) =>
-            api.post(`/leaves/${id}/reject`, { reason }),
-        cancel: (id: number) => api.post(`/leaves/${id}/cancel`),
+            api.post(`/hrms/leaves/${id}/reject`, { reason }),
+        cancel: (id: number) => api.post(`/hrms/leaves/${id}/cancel`),
+        getBalance: (employeeId: number, year: number) => api.get(`/hrms/leaves/balance/${employeeId}/${year}`),
+        requests: (employeeId: number, params?: { status?: string }) => api.get(`/hrms/leaves/requests/${employeeId}`, { params }),
     },
 
     // Payroll
     payroll: {
         list: (params?: { month?: number; year?: number; status?: string }) =>
-            api.get('/payroll', { params }),
-        get: (id: number) => api.get(`/payroll/${id}`),
+            api.get('/hrms/payroll', { params }),
+        get: (id: number) => api.get(`/hrms/payroll/${id}`),
         generate: (month: number, year: number) =>
-            api.post('/payroll/generate', { month, year }),
-        markPaid: (id: number) => api.post(`/payroll/${id}/mark-paid`),
+            api.post('/hrms/payroll/generate', { month, year }),
+        markPaid: (id: number) => api.post(`/hrms/payroll/${id}/mark-paid`),
     },
 
     // Shifts
     shifts: {
-        list: () => api.get('/shifts'),
-        get: (id: number) => api.get(`/shifts/${id}`),
-        create: (data: any) => api.post('/shifts', data),
-        update: (id: number, data: any) => api.put(`/shifts/${id}`, data),
-        delete: (id: number) => api.delete(`/shifts/${id}`),
+        list: () => api.get('/hrms/shifts'),
+        get: (id: number) => api.get(`/hrms/shifts/${id}`),
+        create: (data: any) => api.post('/hrms/shifts', data),
+        update: (id: number, data: any) => api.put(`/hrms/shifts/${id}`, data),
+        delete: (id: number) => api.delete(`/hrms/shifts/${id}`),
         assignments: {
             list: (params?: { shift_id?: number; employee_id?: number }) =>
-                api.get('/shifts/assignments', { params }),
-            create: (data: any) => api.post('/shifts/assignments', data),
-            update: (id: number, data: any) => api.put(`/shifts/assignments/${id}`, data),
-            delete: (id: number) => api.delete(`/shifts/assignments/${id}`),
+                api.get('/hrms/shifts/assignments', { params }),
+            getEmployeeShift: (employeeId: number) => api.get(`/hrms/shifts/employee/${employeeId}`),
+            create: (data: any) => api.post('/hrms/shifts/assignments', data),
+            update: (id: number, data: any) => api.put(`/hrms/shifts/assignments/${id}`, data),
+            delete: (id: number) => api.delete(`/hrms/shifts/assignments/${id}`),
         },
     },
 
     // Workflows
     workflows: {
-        list: () => api.get('/workflows'),
-        get: (id: number) => api.get(`/workflows/${id}`),
-        create: (data: any) => api.post('/workflows', data),
-        update: (id: number, data: any) => api.put(`/workflows/${id}`, data),
-        delete: (id: number) => api.delete(`/workflows/${id}`),
+        list: () => api.get('/hrms/workflows'),
+        get: (id: number) => api.get(`/hrms/workflows/${id}`),
+        create: (data: any) => api.post('/hrms/workflows', data),
+        update: (id: number, data: any) => api.put(`/hrms/workflows/${id}`, data),
+        delete: (id: number) => api.delete(`/hrms/workflows/${id}`),
     },
 
     // Policies
     policies: {
         payroll: {
-            list: () => api.get('/policies/payroll'),
-            get: (id: number) => api.get(`/policies/payroll/${id}`),
-            create: (data: any) => api.post('/policies/payroll', data),
-            update: (id: number, data: any) => api.put(`/policies/payroll/${id}`, data),
-            setDefault: (id: number) => api.post(`/policies/payroll/${id}/set-default`),
+            list: () => api.get('/hrms/policies/payroll'),
+            get: (id: number) => api.get(`/hrms/policies/payroll/${id}`),
+            create: (data: any) => api.post('/hrms/policies/payroll', data),
+            update: (id: number, data: any) => api.put(`/hrms/policies/payroll/${id}`, data),
+            setDefault: (id: number) => api.post(`/hrms/policies/payroll/${id}/set-default`),
         },
         attendance: {
-            list: () => api.get('/policies/attendance'),
-            get: (id: number) => api.get(`/policies/attendance/${id}`),
-            create: (data: any) => api.post('/policies/attendance', data),
-            update: (id: number, data: any) => api.put(`/policies/attendance/${id}`, data),
-            setDefault: (id: number) => api.post(`/policies/attendance/${id}/set-default`),
+            list: () => api.get('/hrms/policies/attendance'),
+            get: (id: number) => api.get(`/hrms/policies/attendance/${id}`),
+            create: (data: any) => api.post('/hrms/policies/attendance', data),
+            update: (id: number, data: any) => api.put(`/hrms/policies/attendance/${id}`, data),
+            setDefault: (id: number) => api.post(`/hrms/policies/attendance/${id}/set-default`),
         },
     },
 
@@ -173,24 +177,77 @@ export const apiClient = {
 
     // Face Attendance
     faceAttendance: {
-        punch: (data: FormData, eventTime: string) =>
-            api.post('/face_attendance/punch', data, {
-                params: { event_time: eventTime },
+        punch: async (data: FormData, eventTime: string) => {
+            // Using fetch instead of axios for reliable multipart uploads in React Native
+            const token = await storage.getToken();
+            const config = {
+                method: 'POST',
                 headers: {
-                    'Content-Type': 'multipart/form-data',
+                    'Authorization': token ? `Bearer ${token}` : '',
+                    // Let fetch set the Content-Type automatically with boundary
                 },
-            }),
-        geoPunch: (data: FormData, eventTime: string, lat: number, lng: number) =>
-            api.post('/face_attendance/geo_punch', data, {
-                params: {
-                    event_time: eventTime,
-                    lat: lat.toString(),
-                    lng: lng.toString()
-                },
+                body: data,
+            };
+
+            const response = await fetch(`${API_BASE_URL}/face_attendance/punch?event_time=${encodeURIComponent(eventTime)}`, config);
+
+            if (!response.ok) {
+                const errorBody = await response.text();
+                let errorData;
+                try {
+                    errorData = JSON.parse(errorBody);
+                } catch (e) {
+                    errorData = { message: errorBody };
+                }
+
+                // Mimic Axios error structure for consistency
+                const error: any = new Error(errorData.message || 'Request failed');
+                error.response = {
+                    status: response.status,
+                    data: errorData
+                };
+                throw error;
+            }
+
+            const responseData = await response.json();
+            return { data: responseData };
+        },
+        geoPunch: async (data: FormData, eventTime: string, lat: number, lng: number) => {
+            // Using fetch instead of axios for reliable multipart uploads in React Native
+            const token = await storage.getToken();
+            const config = {
+                method: 'POST',
                 headers: {
-                    'Content-Type': 'multipart/form-data',
+                    'Authorization': token ? `Bearer ${token}` : '',
+                    // Let fetch set the Content-Type automatically with boundary
                 },
-            }),
+                body: data,
+            };
+
+            const url = `${API_BASE_URL}/face_attendance/geo_punch?event_time=${encodeURIComponent(eventTime)}&lat=${lat}&lng=${lng}`;
+            const response = await fetch(url, config);
+
+            if (!response.ok) {
+                const errorBody = await response.text();
+                let errorData;
+                try {
+                    errorData = JSON.parse(errorBody);
+                } catch (e) {
+                    errorData = { message: errorBody };
+                }
+
+                // Mimic Axios error structure for consistency
+                const error: any = new Error(errorData.message || 'Request failed');
+                error.response = {
+                    status: response.status,
+                    data: errorData
+                };
+                throw error;
+            }
+
+            const responseData = await response.json();
+            return { data: responseData };
+        },
     },
 };
 

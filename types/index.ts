@@ -6,6 +6,9 @@ export interface AuthUser {
     user_id: number;
     role: UserRole;
     employee_id: number | null;
+    first_name?: string;
+    last_name?: string;
+    email?: string;
 }
 
 export interface Employee {
@@ -32,8 +35,11 @@ export interface Attendance {
     check_out?: string;
     status: 'present' | 'absent' | 'late' | 'half_day' | 'leave';
     work_hours?: number;
+    net_hours?: number; // Added to match new endpoint
     overtime_hours?: number;
     notes?: string;
+    is_late?: boolean;
+    is_overtime?: boolean;
 }
 
 export interface Leave {
@@ -86,6 +92,24 @@ export interface ShiftAssignment {
     start_date: string;
     end_date?: string;
     status: 'active' | 'inactive';
+    start_time?: string;
+    end_time?: string;
+}
+
+export interface EmployeeShiftDetails {
+    id: number;
+    employee_id: number;
+    shift_id: number;
+    effective_from: string;
+    effective_to: string | null;
+    shift_name: string;
+    start_time: string;
+    end_time: string;
+    required_hours: number;
+    is_night_shift: boolean;
+    break_start: string;
+    break_end: string;
+    break_minutes: number;
 }
 
 export interface Workflow {
