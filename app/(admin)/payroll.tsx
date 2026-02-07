@@ -1,4 +1,4 @@
-// Payroll screen
+// Premium Payroll Processing Screen
 import React, { useEffect, useState, useCallback } from 'react';
 import {
     View,
@@ -6,40 +6,65 @@ import {
     StyleSheet,
     FlatList,
     TouchableOpacity,
+    TextInput,
     RefreshControl,
+    ScrollView,
+    Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Card, Badge, getStatusVariant, Loading, Button, Modal, Toast } from '../../components/ui';
+import { router } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Icon } from '../../components/Icon';
-import { Colors, Spacing, Typography, BorderRadius } from '../../constants/theme';
+import { Loading } from '../../components/ui';
+import { Colors, Spacing, Typography, BorderRadius, Shadows } from '../../constants/theme';
 import { apiClient } from '../../lib/api';
-import { Payroll } from '../../types';
 import { format } from 'date-fns';
 
-const months = [
-    'January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December'
-];
+interface PayrollRecord {
+    payroll_id: number;
+    employee_id: number;
+    employee_name?: string;
+    first_name?: string;
+    last_name?: string;
+    department?: string;
+    month: number;
+    year: number;
+    basic_salary: number;
+    gross_pay: number;
+    net_pay: number;
+    deductions?: number;
+    overtime_pay?: number;
+    status: string;
+}
+
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'];
 
 export default function PayrollScreen() {
-    const [payrolls, setPayrolls] = useState<Payroll[]>([]);
+    const [payrolls, setPayrolls] = useState<PayrollRecord[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
     const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
     const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
-    const [selectedPayroll, setSelectedPayroll] = useState<Payroll | null>(null);
-    const [generating, setGenerating] = useState(false);
-    const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+    const [error, setError] = useState<string | null>(null);
+    const [isRunning, setIsRunning] = useState(false);
 
     const fetchPayrolls = useCallback(async () => {
         try {
-            const response = await apiClient.payroll.list({ month: selectedMonth, year: selectedYear });
-            setPayrolls(response.data.items || response.data || []);
-        } catch (error) {
-            console.error('Error fetching payrolls:', error);
+            const response = await apiClient.payroll.list({
+                month: selectedMonth,
+                year: selectedYear
+            });
+            const data = response.data?.items || response.data || [];
+            setPayrolls(Array.isArray(data) ? data : []);
+        } catch (err: any) {
+            // Silently handle - show empty state
+            console.log('Payroll data unavailable');
             setPayrolls([]);
         } finally {
             setIsLoading(false);
+            setRefreshing(false);
         }
     }, [selectedMonth, selectedYear]);
 
@@ -47,65 +72,66 @@ export default function PayrollScreen() {
         fetchPayrolls();
     }, [fetchPayrolls]);
 
-    const onRefresh = useCallback(async () => {
+    const onRefresh = useCallback(() => {
         setRefreshing(true);
-        await fetchPayrolls();
-        setRefreshing(false);
+        fetchPayrolls();
     }, [fetchPayrolls]);
 
-    const handleGenerate = async () => {
-        setGenerating(true);
+    const handleRunBulkPayroll = () => {
+        Alert.alert(
+            'Run Bulk Payroll',
+            `Generate payroll for ${MONTHS[selectedMonth - 1]} ${selectedYear}?`,
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Run',
+                    onPress: async () => {
+                        setIsRunning(true);
+                        try {
+                            await apiClient.payroll.generate(selectedMonth, selectedYear);
+                            Alert.alert('Success', 'Payroll generated successfully');
+                            fetchPayrolls();
+                        } catch (err) {
+                            Alert.alert('Error', 'Failed to generate payroll');
+                        } finally {
+                            setIsRunning(false);
+                        }
+                    }
+                }
+            ]
+        );
+    };
+
+    const handleMarkPaid = async (payrollId: number) => {
         try {
-            await apiClient.payroll.generate(selectedMonth, selectedYear);
-            setToast({ message: 'Payroll generated successfully', type: 'success' });
-            await fetchPayrolls();
-        } catch (error) {
-            setToast({ message: 'Failed to generate payroll', type: 'error' });
-        } finally {
-            setGenerating(false);
+            await apiClient.payroll.markPaid(payrollId);
+            Alert.alert('Success', 'Payroll marked as paid');
+            fetchPayrolls();
+        } catch (err) {
+            Alert.alert('Error', 'Failed to update payroll status');
         }
     };
 
-    const handleMonthChange = (direction: 'prev' | 'next') => {
-        if (direction === 'prev') {
-            if (selectedMonth === 1) {
-                setSelectedMonth(12);
-                setSelectedYear(y => y - 1);
-            } else {
-                setSelectedMonth(m => m - 1);
-            }
-        } else {
-            if (selectedMonth === 12) {
-                setSelectedMonth(1);
-                setSelectedYear(y => y + 1);
-            } else {
-                setSelectedMonth(m => m + 1);
-            }
+    const getStatusStyle = (status: string) => {
+        switch (status?.toLowerCase()) {
+            case 'paid': return { bg: '#D1FAE5', text: '#059669', icon: 'check-circle' };
+            case 'pending': return { bg: '#FEF3C7', text: '#D97706', icon: 'clock' };
+            case 'processing': return { bg: '#DBEAFE', text: '#1D4ED8', icon: 'refresh-cw' };
+            default: return { bg: '#F1F5F9', text: '#64748B', icon: 'help-circle' };
         }
     };
-
-    const renderPayroll = ({ item }: { item: Payroll }) => (
-        <Card style={styles.payrollCard} onPress={() => setSelectedPayroll(item)}>
-            <View style={styles.payrollRow}>
-                <View style={styles.avatar}>
-                    <Icon name="user" size={20} color={Colors.primary[600]} />
-                </View>
-                <View style={styles.payrollInfo}>
-                    <Text style={styles.employeeName}>{item.employee_name || `Employee ${item.employee_id}`}</Text>
-                    <Text style={styles.netSalary}>₹{item.net_salary?.toLocaleString() || '0'}</Text>
-                </View>
-                <Badge
-                    text={item.status}
-                    variant={getStatusVariant(item.status)}
-                    size="sm"
-                />
-            </View>
-        </Card>
-    );
 
     // Calculate totals
-    const totalNetSalary = payrolls.reduce((sum, p) => sum + (p.net_salary || 0), 0);
-    const paidCount = payrolls.filter(p => p.status === 'paid').length;
+    const totalGross = payrolls.reduce((sum, p) => sum + (p.gross_pay || 0), 0);
+    const totalNet = payrolls.reduce((sum, p) => sum + (p.net_pay || 0), 0);
+    const totalOT = payrolls.reduce((sum, p) => sum + (p.overtime_pay || 0), 0);
+    const paidCount = payrolls.filter(p => p.status?.toLowerCase() === 'paid').length;
+
+    // Filter payrolls
+    const filteredPayrolls = payrolls.filter(p => {
+        const name = p.employee_name || `${p.first_name || ''} ${p.last_name || ''}`;
+        return name.toLowerCase().includes(searchQuery.toLowerCase());
+    });
 
     if (isLoading) {
         return <Loading fullScreen text="Loading payroll..." />;
@@ -115,144 +141,228 @@ export default function PayrollScreen() {
         <SafeAreaView style={styles.container} edges={['top']}>
             {/* Header */}
             <View style={styles.header}>
-                <Text style={styles.title}>Payroll</Text>
-                <Button
-                    title="Generate"
-                    size="sm"
-                    onPress={handleGenerate}
-                    loading={generating}
-                    icon={<Icon name="plus" size={16} color={Colors.text.inverse} />}
-                />
-            </View>
-
-            {/* Month Selector */}
-            <View style={styles.monthSelector}>
-                <TouchableOpacity onPress={() => handleMonthChange('prev')} style={styles.monthArrow}>
-                    <Icon name="chevron-left" size={24} color={Colors.text.primary} />
+                <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+                    <Icon name="arrow-left" size={24} color={Colors.text.primary} />
                 </TouchableOpacity>
-                <View style={styles.monthDisplay}>
-                    <Text style={styles.monthText}>{months[selectedMonth - 1]}</Text>
-                    <Text style={styles.yearText}>{selectedYear}</Text>
-                </View>
-                <TouchableOpacity onPress={() => handleMonthChange('next')} style={styles.monthArrow}>
-                    <Icon name="chevron-right" size={24} color={Colors.text.primary} />
+                <Text style={styles.headerTitle}>Payroll Processing</Text>
+                <TouchableOpacity style={styles.settingsButton}>
+                    <Icon name="settings" size={20} color={Colors.text.secondary} />
                 </TouchableOpacity>
             </View>
 
-            {/* Summary Card */}
-            <Card style={styles.summaryCard}>
-                <View style={styles.summaryRow}>
-                    <View style={styles.summaryItem}>
-                        <Text style={styles.summaryValue}>₹{totalNetSalary.toLocaleString()}</Text>
-                        <Text style={styles.summaryLabel}>Total Payroll</Text>
-                    </View>
-                    <View style={styles.summaryDivider} />
-                    <View style={styles.summaryItem}>
-                        <Text style={styles.summaryValue}>{payrolls.length}</Text>
-                        <Text style={styles.summaryLabel}>Employees</Text>
-                    </View>
-                    <View style={styles.summaryDivider} />
-                    <View style={styles.summaryItem}>
-                        <Text style={[styles.summaryValue, { color: Colors.success.main }]}>{paidCount}</Text>
-                        <Text style={styles.summaryLabel}>Paid</Text>
-                    </View>
-                </View>
-            </Card>
-
-            {/* Payroll List */}
             <FlatList
-                data={payrolls}
-                keyExtractor={(item) => item.payroll_id.toString()}
-                renderItem={renderPayroll}
-                contentContainerStyle={styles.listContent}
+                data={[1]}
+                keyExtractor={() => 'content'}
+                renderItem={() => (
+                    <>
+                        {/* Month Selector */}
+                        <View style={styles.monthSelector}>
+                            <TouchableOpacity
+                                onPress={() => {
+                                    if (selectedMonth === 1) {
+                                        setSelectedMonth(12);
+                                        setSelectedYear(y => y - 1);
+                                    } else {
+                                        setSelectedMonth(m => m - 1);
+                                    }
+                                }}
+                                style={styles.monthNavButton}
+                            >
+                                <Icon name="chevron-left" size={24} color={Colors.text.tertiary} />
+                            </TouchableOpacity>
+                            <View style={styles.monthDisplay}>
+                                <Text style={styles.monthText}>{MONTHS[selectedMonth - 1]} {selectedYear}</Text>
+                            </View>
+                            <TouchableOpacity
+                                onPress={() => {
+                                    if (selectedMonth === 12) {
+                                        setSelectedMonth(1);
+                                        setSelectedYear(y => y + 1);
+                                    } else {
+                                        setSelectedMonth(m => m + 1);
+                                    }
+                                }}
+                                style={styles.monthNavButton}
+                            >
+                                <Icon name="chevron-right" size={24} color={Colors.text.tertiary} />
+                            </TouchableOpacity>
+                        </View>
+
+                        {/* Run Bulk Payroll Button */}
+                        <TouchableOpacity
+                            style={styles.runPayrollButton}
+                            onPress={handleRunBulkPayroll}
+                            activeOpacity={0.8}
+                            disabled={isRunning}
+                        >
+                            <LinearGradient
+                                colors={['#137FEC', '#0D5EBD']}
+                                style={styles.runPayrollGradient}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 0 }}
+                            >
+                                <Icon name="play" size={20} color="#FFFFFF" />
+                                <Text style={styles.runPayrollText}>
+                                    {isRunning ? 'Processing...' : 'Run Bulk Payroll'}
+                                </Text>
+                            </LinearGradient>
+                        </TouchableOpacity>
+
+                        {/* KPI Cards */}
+                        <ScrollView
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            contentContainerStyle={styles.kpiContainer}
+                        >
+                            <View style={[styles.kpiCard, styles.kpiCardBlue]}>
+                                <Text style={styles.kpiLabel}>Total Gross</Text>
+                                <Text style={styles.kpiValue}>₹{totalGross.toLocaleString()}</Text>
+                                <Text style={styles.kpiSubtext}>{payrolls.length} employees</Text>
+                            </View>
+                            <View style={[styles.kpiCard, styles.kpiCardGreen]}>
+                                <Text style={styles.kpiLabel}>Total Net</Text>
+                                <Text style={styles.kpiValue}>₹{totalNet.toLocaleString()}</Text>
+                                <Text style={styles.kpiSubtext}>{paidCount} paid</Text>
+                            </View>
+                            <View style={[styles.kpiCard, styles.kpiCardPurple]}>
+                                <Text style={styles.kpiLabel}>OT Payout</Text>
+                                <Text style={styles.kpiValue}>₹{totalOT.toLocaleString()}</Text>
+                                <Text style={styles.kpiSubtext}>Overtime</Text>
+                            </View>
+                        </ScrollView>
+
+                        {/* Search */}
+                        <View style={styles.searchRow}>
+                            <View style={styles.searchContainer}>
+                                <Icon name="search" size={20} color={Colors.text.tertiary} />
+                                <TextInput
+                                    style={styles.searchInput}
+                                    placeholder="Search employee..."
+                                    placeholderTextColor={Colors.text.tertiary}
+                                    value={searchQuery}
+                                    onChangeText={setSearchQuery}
+                                />
+                            </View>
+                            <TouchableOpacity style={styles.filterButton}>
+                                <Icon name="filter" size={18} color={Colors.text.secondary} />
+                            </TouchableOpacity>
+                        </View>
+
+                        {/* Section Header */}
+                        <View style={styles.sectionHeader}>
+                            <Text style={styles.sectionTitle}>Payroll Details</Text>
+                            <Text style={styles.sectionCount}>{filteredPayrolls.length} records</Text>
+                        </View>
+
+                        {/* Error State */}
+                        {error && (
+                            <View style={styles.errorContainer}>
+                                <Icon name="alert-triangle" size={20} color={Colors.error.main} />
+                                <Text style={styles.errorText}>{error}</Text>
+                            </View>
+                        )}
+
+                        {/* Payroll Cards */}
+                        {filteredPayrolls.map((payroll) => {
+                            const statusStyle = getStatusStyle(payroll.status);
+                            const employeeName = payroll.employee_name ||
+                                `${payroll.first_name || ''} ${payroll.last_name || ''}`.trim() || 'Unknown';
+                            const isPending = payroll.status?.toLowerCase() === 'pending';
+
+                            return (
+                                <View key={payroll.payroll_id} style={styles.payrollCard}>
+                                    {/* Card Header */}
+                                    <View style={styles.cardHeader}>
+                                        <View style={styles.employeeInfo}>
+                                            <View style={styles.avatar}>
+                                                <Text style={styles.avatarText}>
+                                                    {employeeName.split(' ').map(n => n[0]).join('').substring(0, 2)}
+                                                </Text>
+                                            </View>
+                                            <View>
+                                                <Text style={styles.employeeName}>{employeeName}</Text>
+                                                <Text style={styles.employeeDept}>
+                                                    {payroll.department || 'General'}
+                                                </Text>
+                                            </View>
+                                        </View>
+                                        <View style={[styles.statusBadge, { backgroundColor: statusStyle.bg }]}>
+                                            <Icon name={statusStyle.icon} size={12} color={statusStyle.text} />
+                                            <Text style={[styles.statusText, { color: statusStyle.text }]}>
+                                                {payroll.status}
+                                            </Text>
+                                        </View>
+                                    </View>
+
+                                    {/* Salary Grid */}
+                                    <View style={styles.salaryGrid}>
+                                        <View style={styles.salaryItem}>
+                                            <Text style={styles.salaryLabel}>Basic</Text>
+                                            <Text style={styles.salaryValue}>
+                                                ₹{(payroll.basic_salary || 0).toLocaleString()}
+                                            </Text>
+                                        </View>
+                                        <View style={styles.salaryItem}>
+                                            <Text style={styles.salaryLabel}>Gross</Text>
+                                            <Text style={styles.salaryValue}>
+                                                ₹{(payroll.gross_pay || 0).toLocaleString()}
+                                            </Text>
+                                        </View>
+                                        <View style={styles.salaryItem}>
+                                            <Text style={styles.salaryLabel}>Deductions</Text>
+                                            <Text style={[styles.salaryValue, { color: '#EF4444' }]}>
+                                                -₹{(payroll.deductions || 0).toLocaleString()}
+                                            </Text>
+                                        </View>
+                                    </View>
+
+                                    {/* Net Pay */}
+                                    <View style={styles.netPayRow}>
+                                        <Text style={styles.netPayLabel}>Net Pay</Text>
+                                        <Text style={styles.netPayValue}>
+                                            ₹{(payroll.net_pay || 0).toLocaleString()}
+                                        </Text>
+                                    </View>
+
+                                    {/* Action Button */}
+                                    {isPending && (
+                                        <TouchableOpacity
+                                            style={styles.markPaidButton}
+                                            onPress={() => handleMarkPaid(payroll.payroll_id)}
+                                        >
+                                            <Icon name="check" size={16} color="#FFFFFF" />
+                                            <Text style={styles.markPaidText}>Mark as Paid</Text>
+                                        </TouchableOpacity>
+                                    )}
+                                </View>
+                            );
+                        })}
+
+                        {/* Empty State */}
+                        {filteredPayrolls.length === 0 && !error && (
+                            <View style={styles.emptyState}>
+                                <Icon name="wallet" size={48} color={Colors.text.tertiary} />
+                                <Text style={styles.emptyTitle}>No Payroll Data</Text>
+                                <Text style={styles.emptyText}>
+                                    No payroll records for {MONTHS[selectedMonth - 1]} {selectedYear}
+                                </Text>
+                                <TouchableOpacity
+                                    style={styles.generateButton}
+                                    onPress={handleRunBulkPayroll}
+                                >
+                                    <Text style={styles.generateButtonText}>Generate Payroll</Text>
+                                </TouchableOpacity>
+                            </View>
+                        )}
+
+                        <View style={{ height: 120 }} />
+                    </>
+                )}
                 refreshControl={
                     <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
                 }
                 showsVerticalScrollIndicator={false}
-                ListEmptyComponent={
-                    <View style={styles.emptyState}>
-                        <Icon name="wallet" size={48} color={Colors.text.tertiary} />
-                        <Text style={styles.emptyText}>No payroll records for this month</Text>
-                        <Button
-                            title="Generate Payroll"
-                            onPress={handleGenerate}
-                            loading={generating}
-                            style={{ marginTop: Spacing.lg }}
-                        />
-                    </View>
-                }
             />
-
-            {/* Detail Modal */}
-            <Modal
-                visible={!!selectedPayroll}
-                onClose={() => setSelectedPayroll(null)}
-                title="Payroll Details"
-            >
-                {selectedPayroll && (
-                    <View style={styles.modalContent}>
-                        <View style={styles.modalRow}>
-                            <Text style={styles.modalLabel}>Employee</Text>
-                            <Text style={styles.modalValue}>
-                                {selectedPayroll.employee_name || `Employee ${selectedPayroll.employee_id}`}
-                            </Text>
-                        </View>
-                        <View style={styles.modalRow}>
-                            <Text style={styles.modalLabel}>Status</Text>
-                            <Badge
-                                text={selectedPayroll.status}
-                                variant={getStatusVariant(selectedPayroll.status)}
-                            />
-                        </View>
-                        <View style={styles.divider} />
-                        <View style={styles.modalRow}>
-                            <Text style={styles.modalLabel}>Basic Salary</Text>
-                            <Text style={styles.modalValue}>₹{selectedPayroll.basic_salary?.toLocaleString()}</Text>
-                        </View>
-                        <View style={styles.modalRow}>
-                            <Text style={styles.modalLabel}>Present Days</Text>
-                            <Text style={styles.modalValue}>{selectedPayroll.present_days}</Text>
-                        </View>
-                        <View style={styles.modalRow}>
-                            <Text style={styles.modalLabel}>Absent Days</Text>
-                            <Text style={styles.modalValue}>{selectedPayroll.absent_days}</Text>
-                        </View>
-                        <View style={styles.modalRow}>
-                            <Text style={styles.modalLabel}>Overtime Hours</Text>
-                            <Text style={styles.modalValue}>{selectedPayroll.overtime_hours?.toFixed(1)} hrs</Text>
-                        </View>
-                        <View style={styles.modalRow}>
-                            <Text style={styles.modalLabel}>Overtime Pay</Text>
-                            <Text style={[styles.modalValue, { color: Colors.success.main }]}>
-                                +₹{selectedPayroll.overtime_pay?.toLocaleString() || '0'}
-                            </Text>
-                        </View>
-                        <View style={styles.modalRow}>
-                            <Text style={styles.modalLabel}>Deductions</Text>
-                            <Text style={[styles.modalValue, { color: Colors.error.main }]}>
-                                -₹{selectedPayroll.deductions?.toLocaleString() || '0'}
-                            </Text>
-                        </View>
-                        <View style={styles.divider} />
-                        <View style={styles.modalRow}>
-                            <Text style={[styles.modalLabel, { fontWeight: Typography.weight.bold }]}>Net Salary</Text>
-                            <Text style={[styles.modalValue, { fontSize: Typography.size.xl }]}>
-                                ₹{selectedPayroll.net_salary?.toLocaleString()}
-                            </Text>
-                        </View>
-                    </View>
-                )}
-            </Modal>
-
-            {/* Toast */}
-            {toast && (
-                <Toast
-                    visible={!!toast}
-                    type={toast.type}
-                    message={toast.message}
-                    onDismiss={() => setToast(null)}
-                />
-            )}
         </SafeAreaView>
     );
 }
@@ -260,141 +370,310 @@ export default function PayrollScreen() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: Colors.background.secondary,
+        backgroundColor: '#F8FAFC',
     },
     header: {
         flexDirection: 'row',
-        justifyContent: 'space-between',
         alignItems: 'center',
+        justifyContent: 'space-between',
         paddingHorizontal: Spacing.lg,
         paddingVertical: Spacing.md,
+        backgroundColor: '#FFFFFF',
+        borderBottomWidth: 1,
+        borderBottomColor: Colors.border.light,
     },
-    title: {
-        fontSize: Typography.size['2xl'],
+    backButton: {
+        padding: Spacing.sm,
+        marginLeft: -Spacing.sm,
+    },
+    headerTitle: {
+        fontSize: Typography.size.lg,
         fontWeight: Typography.weight.bold,
         color: Colors.text.primary,
+    },
+    settingsButton: {
+        padding: Spacing.sm,
+        marginRight: -Spacing.sm,
     },
     monthSelector: {
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'space-between',
-        backgroundColor: Colors.background.primary,
-        marginHorizontal: Spacing.lg,
-        marginBottom: Spacing.md,
-        paddingVertical: Spacing.md,
-        paddingHorizontal: Spacing.lg,
-        borderRadius: BorderRadius.xl,
+        justifyContent: 'center',
+        paddingVertical: Spacing.lg,
+        backgroundColor: '#FFFFFF',
     },
-    monthArrow: {
+    monthNavButton: {
         padding: Spacing.sm,
     },
     monthDisplay: {
-        alignItems: 'center',
+        paddingHorizontal: Spacing['2xl'],
     },
     monthText: {
         fontSize: Typography.size.lg,
-        fontWeight: Typography.weight.semibold,
-        color: Colors.text.primary,
-    },
-    yearText: {
-        fontSize: Typography.size.sm,
-        color: Colors.text.secondary,
-        marginTop: 2,
-    },
-    summaryCard: {
-        marginHorizontal: Spacing.lg,
-        marginBottom: Spacing.md,
-        padding: Spacing.lg,
-    },
-    summaryRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-    summaryItem: {
-        flex: 1,
-        alignItems: 'center',
-    },
-    summaryValue: {
-        fontSize: Typography.size.xl,
         fontWeight: Typography.weight.bold,
         color: Colors.text.primary,
     },
-    summaryLabel: {
+    runPayrollButton: {
+        marginHorizontal: Spacing.lg,
+        borderRadius: BorderRadius.xl,
+        overflow: 'hidden',
+        ...Shadows.lg,
+    },
+    runPayrollGradient: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: Spacing.sm,
+        paddingVertical: Spacing.lg,
+    },
+    runPayrollText: {
+        fontSize: Typography.size.base,
+        fontWeight: Typography.weight.bold,
+        color: '#FFFFFF',
+    },
+    kpiContainer: {
+        paddingHorizontal: Spacing.lg,
+        paddingVertical: Spacing.lg,
+        gap: Spacing.md,
+    },
+    kpiCard: {
+        width: 160,
+        padding: Spacing.lg,
+        borderRadius: BorderRadius.xl,
+        marginRight: Spacing.md,
+    },
+    kpiCardBlue: {
+        backgroundColor: '#EFF6FF',
+        borderWidth: 1,
+        borderColor: '#BFDBFE',
+    },
+    kpiCardGreen: {
+        backgroundColor: '#ECFDF5',
+        borderWidth: 1,
+        borderColor: '#A7F3D0',
+    },
+    kpiCardPurple: {
+        backgroundColor: '#F5F3FF',
+        borderWidth: 1,
+        borderColor: '#DDD6FE',
+    },
+    kpiLabel: {
         fontSize: Typography.size.xs,
+        fontWeight: Typography.weight.medium,
         color: Colors.text.secondary,
+    },
+    kpiValue: {
+        fontSize: Typography.size['2xl'],
+        fontWeight: Typography.weight.bold,
+        color: Colors.text.primary,
         marginTop: 4,
     },
-    summaryDivider: {
-        width: 1,
-        height: 40,
-        backgroundColor: Colors.border.light,
+    kpiSubtext: {
+        fontSize: Typography.size.xs,
+        color: Colors.text.tertiary,
+        marginTop: 4,
     },
-    listContent: {
-        padding: Spacing.lg,
-        paddingTop: 0,
+    searchRow: {
+        flexDirection: 'row',
         gap: Spacing.md,
-        paddingBottom: Spacing['5xl'],
+        paddingHorizontal: Spacing.lg,
+        marginBottom: Spacing.md,
+    },
+    searchContainer: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#FFFFFF',
+        paddingHorizontal: Spacing.md,
+        borderRadius: BorderRadius.xl,
+        gap: Spacing.sm,
+        ...Shadows.sm,
+    },
+    searchInput: {
+        flex: 1,
+        fontSize: Typography.size.sm,
+        color: Colors.text.primary,
+        paddingVertical: Spacing.md,
+    },
+    filterButton: {
+        width: 48,
+        height: 48,
+        backgroundColor: '#FFFFFF',
+        borderRadius: BorderRadius.xl,
+        alignItems: 'center',
+        justifyContent: 'center',
+        ...Shadows.sm,
+    },
+    sectionHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingHorizontal: Spacing.lg,
+        marginBottom: Spacing.md,
+    },
+    sectionTitle: {
+        fontSize: Typography.size.base,
+        fontWeight: Typography.weight.bold,
+        color: Colors.text.primary,
+    },
+    sectionCount: {
+        fontSize: Typography.size.sm,
+        color: Colors.text.tertiary,
     },
     payrollCard: {
-        padding: Spacing.md,
+        backgroundColor: '#FFFFFF',
+        marginHorizontal: Spacing.lg,
+        marginBottom: Spacing.md,
+        borderRadius: BorderRadius.xl,
+        padding: Spacing.lg,
+        borderWidth: 1,
+        borderColor: '#F1F5F9',
+        ...Shadows.sm,
     },
-    payrollRow: {
+    cardHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
+        marginBottom: Spacing.lg,
+    },
+    employeeInfo: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: Spacing.md,
     },
     avatar: {
-        width: 40,
-        height: 40,
-        borderRadius: BorderRadius.full,
-        backgroundColor: Colors.primary[50],
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: Colors.primary[100],
         alignItems: 'center',
         justifyContent: 'center',
     },
-    payrollInfo: {
-        flex: 1,
+    avatarText: {
+        fontSize: Typography.size.sm,
+        fontWeight: Typography.weight.bold,
+        color: Colors.primary[700],
     },
     employeeName: {
-        fontSize: Typography.size.base,
-        fontWeight: Typography.weight.medium,
+        fontSize: Typography.size.sm,
+        fontWeight: Typography.weight.bold,
         color: Colors.text.primary,
     },
-    netSalary: {
-        fontSize: Typography.size.lg,
-        fontWeight: Typography.weight.bold,
-        color: Colors.success.main,
+    employeeDept: {
+        fontSize: Typography.size.xs,
+        color: Colors.text.tertiary,
         marginTop: 2,
+    },
+    statusBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 4,
+        borderRadius: BorderRadius.md,
+    },
+    statusText: {
+        fontSize: Typography.size.xs,
+        fontWeight: Typography.weight.semibold,
+        textTransform: 'capitalize',
+    },
+    salaryGrid: {
+        flexDirection: 'row',
+        gap: Spacing.md,
+        marginBottom: Spacing.md,
+    },
+    salaryItem: {
+        flex: 1,
+        backgroundColor: '#F8FAFC',
+        padding: Spacing.md,
+        borderRadius: BorderRadius.lg,
+    },
+    salaryLabel: {
+        fontSize: 10,
+        fontWeight: Typography.weight.semibold,
+        color: Colors.text.tertiary,
+        letterSpacing: 0.5,
+        marginBottom: 4,
+    },
+    salaryValue: {
+        fontSize: Typography.size.sm,
+        fontWeight: Typography.weight.bold,
+        color: Colors.text.primary,
+    },
+    netPayRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingTop: Spacing.md,
+        borderTopWidth: 1,
+        borderTopColor: '#F1F5F9',
+    },
+    netPayLabel: {
+        fontSize: Typography.size.sm,
+        fontWeight: Typography.weight.medium,
+        color: Colors.text.secondary,
+    },
+    netPayValue: {
+        fontSize: Typography.size.xl,
+        fontWeight: '800',
+        color: '#137FEC',
+    },
+    markPaidButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: Spacing.sm,
+        backgroundColor: '#10B981',
+        paddingVertical: Spacing.md,
+        borderRadius: BorderRadius.lg,
+        marginTop: Spacing.md,
+    },
+    markPaidText: {
+        fontSize: Typography.size.sm,
+        fontWeight: Typography.weight.semibold,
+        color: '#FFFFFF',
     },
     emptyState: {
         alignItems: 'center',
         justifyContent: 'center',
         paddingVertical: Spacing['5xl'],
     },
-    emptyText: {
-        fontSize: Typography.size.base,
-        color: Colors.text.secondary,
+    emptyTitle: {
+        fontSize: Typography.size.lg,
+        fontWeight: Typography.weight.bold,
+        color: Colors.text.primary,
         marginTop: Spacing.md,
     },
-    modalContent: {
-        gap: Spacing.md,
-    },
-    modalRow: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-    },
-    modalLabel: {
-        fontSize: Typography.size.base,
+    emptyText: {
+        fontSize: Typography.size.sm,
         color: Colors.text.secondary,
+        marginTop: Spacing.xs,
     },
-    modalValue: {
-        fontSize: Typography.size.base,
-        fontWeight: Typography.weight.medium,
-        color: Colors.text.primary,
+    generateButton: {
+        backgroundColor: '#137FEC',
+        paddingHorizontal: Spacing.xl,
+        paddingVertical: Spacing.md,
+        borderRadius: BorderRadius.lg,
+        marginTop: Spacing.lg,
     },
-    divider: {
-        height: 1,
-        backgroundColor: Colors.border.light,
-        marginVertical: Spacing.sm,
+    generateButtonText: {
+        fontSize: Typography.size.sm,
+        fontWeight: Typography.weight.semibold,
+        color: '#FFFFFF',
+    },
+    errorContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.sm,
+        backgroundColor: Colors.error.light,
+        marginHorizontal: Spacing.lg,
+        padding: Spacing.md,
+        borderRadius: BorderRadius.lg,
+        marginBottom: Spacing.md,
+    },
+    errorText: {
+        fontSize: Typography.size.sm,
+        color: Colors.error.dark,
+        flex: 1,
     },
 });

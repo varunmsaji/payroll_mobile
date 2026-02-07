@@ -1,4 +1,4 @@
-// Employee Home Screen - Redesigned
+// Employee Home Screen - Redesigned Premium UI
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
     View,
@@ -10,6 +10,7 @@ import {
     Alert,
     Platform,
     Dimensions,
+    Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -42,88 +43,118 @@ export default function EmployeeHomeScreen() {
     const router = useRouter();
     const [isLoading, setIsLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
+    const [error, setError] = useState<string | null>(null);
     const [data, setData] = useState<EmployeeDashboardData>({
         todayAttendance: null,
         currentShift: null,
-        leaveBalance: { annual: 20, sick: 10, personal: 5 }, // Mock data
+        leaveBalance: { annual: 0, sick: 0, personal: 0 },
         pendingLeaves: 0,
     });
     const [isCheckedIn, setIsCheckedIn] = useState(false);
-    const [duration, setDuration] = useState('0.0');
+    const [duration, setDuration] = useState('00:00');
 
     // Face Attendance State
     const [showFaceCamera, setShowFaceCamera] = useState(false);
     const [cameraPurpose, setCameraPurpose] = useState<'attendance' | 'geo_attendance'>('attendance');
     const [showOnboardModal, setShowOnboardModal] = useState(false);
 
+    // Ripple animation
+    const rippleAnim = useRef(new Animated.Value(0)).current;
+
     // Timer Ref
     const timerRef = useRef<NodeJS.Timeout | null>(null);
 
+    // Start ripple animation
+    useEffect(() => {
+        const animateRipple = () => {
+            rippleAnim.setValue(0);
+            Animated.loop(
+                Animated.sequence([
+                    Animated.timing(rippleAnim, {
+                        toValue: 1,
+                        duration: 2000,
+                        useNativeDriver: true,
+                    }),
+                ])
+            ).start();
+        };
+        animateRipple();
+    }, []);
+
     const fetchData = useCallback(async () => {
-        if (!user?.employee_id) return;
-
-        try {
-            // Get today's date
-            const today = new Date().toISOString().split('T')[0];
-
-            // Fetch today's attendance
-            const attendanceRes = await apiClient.attendance.getToday(user.employee_id);
-            const todayAttendance = attendanceRes.data;
-
-            // Determine Check-in status
-            // If we have a check-in but NO check-out, we are currently checked in.
-            const isCheckedInNow = !!todayAttendance?.check_in && !todayAttendance?.check_out;
-            setIsCheckedIn(isCheckedInNow);
-
-            // Fetch current shift assignment
-            try {
-                const shiftRes = await apiClient.shifts.assignments.getEmployeeShift(user.employee_id);
-                console.log('Shift Data:', shiftRes.data);
-                // API returns the object directly, not an array
-                const currentShift = shiftRes.data;
-
-                // If the response is the object itself (as per curl output), use it. 
-                // We need to handle potential null/undefined if no shift is assigned.
-                setData(prev => ({ ...prev, currentShift: currentShift || null }));
-            } catch (err) {
-                console.error('Error fetching shift:', err);
-                // If error, set currentShift to null but don't fail everything
-                setData(prev => ({ ...prev, currentShift: null }));
-            }
-
-            // Fetch pending leaves count
-            const leavesRes = await apiClient.leaves.requests(user.employee_id, { status: 'pending' });
-            const pendingLeaves = leavesRes.data?.length || 0;
-
-            // Fetch leave balances
-            const currentYear = new Date().getFullYear();
-            const balanceRes = await apiClient.leaves.getBalance(user.employee_id, currentYear);
-            console.log('[Home] Leave Balance:', balanceRes.data);
-
-            // Map balance data to our local state structure
-            const balances = { annual: 0, sick: 0, personal: 0 };
-            if (Array.isArray(balanceRes.data)) {
-                balanceRes.data.forEach((item: any) => {
-                    const typeName = item.leave_type_name?.toLowerCase() || '';
-                    if (typeName.includes('annual')) balances.annual = item.remaining;
-                    else if (typeName.includes('sick')) balances.sick = item.remaining;
-                    else if (typeName.includes('personal') || typeName.includes('casual')) balances.personal = item.remaining;
-                });
-            }
-
-            setData(prev => ({
-                ...prev,
-                todayAttendance,
-                // currentShift is already updated via its own setData call above
-                leaveBalance: balances,
-                pendingLeaves,
-            }));
-        } catch (error) {
-            console.error('Error fetching employee dashboard:', error);
-        } finally {
+        if (!user?.employee_id) {
             setIsLoading(false);
             setRefreshing(false);
+            return;
         }
+
+        setError(null);
+        let hasError = false;
+
+        // Fetch today's attendance - independent try-catch
+        try {
+            const attendanceRes = await apiClient.attendance.getToday(user.employee_id);
+            const todayAttendance = attendanceRes?.data || null;
+            const isCheckedInNow = !!todayAttendance?.check_in && !todayAttendance?.check_out;
+            setIsCheckedIn(isCheckedInNow);
+            setData(prev => ({ ...prev, todayAttendance }));
+        } catch (err: any) {
+            console.log('Attendance fetch skipped:', err?.response?.status || err.message);
+            // 404 means no attendance record yet - not an error
+            if (err?.response?.status !== 404) {
+                hasError = true;
+            }
+            setIsCheckedIn(false);
+            setData(prev => ({ ...prev, todayAttendance: null }));
+        }
+
+        // Fetch current shift assignment - independent try-catch
+        try {
+            const shiftRes = await apiClient.shifts.assignments.getEmployeeShift(user.employee_id);
+            const currentShift = shiftRes?.data || null;
+            setData(prev => ({ ...prev, currentShift }));
+        } catch (err: any) {
+            console.log('Shift fetch skipped:', err?.response?.status || err.message);
+            setData(prev => ({ ...prev, currentShift: null }));
+        }
+
+        // Fetch pending leaves count - independent try-catch
+        try {
+            const leavesRes = await apiClient.leaves.requests(user.employee_id, { status: 'pending' });
+            const pendingLeaves = Array.isArray(leavesRes?.data) ? leavesRes.data.length : 0;
+            setData(prev => ({ ...prev, pendingLeaves }));
+        } catch (err: any) {
+            console.log('Leaves fetch skipped:', err?.response?.status || err.message);
+            setData(prev => ({ ...prev, pendingLeaves: 0 }));
+        }
+
+        // Fetch leave balances - independent try-catch
+        try {
+            const currentYear = new Date().getFullYear();
+            const balanceRes = await apiClient.leaves.getBalance(user.employee_id, currentYear);
+            const balances = { annual: 0, sick: 0, personal: 0 };
+
+            if (Array.isArray(balanceRes?.data)) {
+                balanceRes.data.forEach((item: any) => {
+                    const typeName = (item?.leave_type_name || '').toLowerCase();
+                    const remaining = typeof item?.remaining === 'number' ? item.remaining : 0;
+                    if (typeName.includes('annual')) balances.annual = remaining;
+                    else if (typeName.includes('sick')) balances.sick = remaining;
+                    else if (typeName.includes('personal') || typeName.includes('casual')) balances.personal = remaining;
+                });
+            }
+            setData(prev => ({ ...prev, leaveBalance: balances }));
+        } catch (err: any) {
+            console.log('Balance fetch skipped:', err?.response?.status || err.message);
+            setData(prev => ({ ...prev, leaveBalance: { annual: 0, sick: 0, personal: 0 } }));
+        }
+
+        if (hasError) {
+            setError('Some data could not be loaded. Pull to refresh.');
+        }
+
+        setIsLoading(false);
+        setRefreshing(false);
     }, [user?.employee_id]);
 
     useEffect(() => {
@@ -143,20 +174,24 @@ export default function EmployeeHomeScreen() {
             if (isCheckedIn && data.todayAttendance?.check_in) {
                 const start = new Date(data.todayAttendance.check_in).getTime();
                 const now = new Date().getTime();
-                const diffHrs = (now - start) / (1000 * 60 * 60);
-                setDuration(diffHrs.toFixed(1));
+                const diffMs = now - start;
+                const hours = Math.floor(diffMs / (1000 * 60 * 60));
+                const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+                setDuration(`${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`);
             } else if (data.todayAttendance?.work_hours || data.todayAttendance?.net_hours) {
                 const hours = data.todayAttendance?.work_hours || data.todayAttendance?.net_hours || 0;
-                setDuration(hours.toFixed(1));
+                const h = Math.floor(hours);
+                const m = Math.round((hours - h) * 60);
+                setDuration(`${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`);
             } else {
-                setDuration('0.0');
+                setDuration('00:00');
             }
         };
 
-        updateDuration(); // Initial call
+        updateDuration();
 
         if (isCheckedIn) {
-            timerRef.current = setInterval(updateDuration, 60000); // Update every minute
+            timerRef.current = setInterval(updateDuration, 60000);
         } else if (timerRef.current) {
             clearInterval(timerRef.current);
         }
@@ -172,45 +207,32 @@ export default function EmployeeHomeScreen() {
 
         try {
             if (isCheckedIn) {
-                // Check Out
                 await apiClient.attendance.checkOut(user.employee_id);
                 Alert.alert('Success', 'Checked out successfully.');
             } else {
-                // Check In
                 await apiClient.attendance.checkIn(user.employee_id);
                 Alert.alert('Success', 'Checked in successfully.');
             }
             fetchData();
         } catch (error: any) {
-            console.error('Manual punch error:', error);
             Alert.alert('Error', error.response?.data?.message || 'Failed to update attendance.');
         }
     };
 
     const handleFaceAttendanceTrigger = (type: 'attendance' | 'geo_attendance') => {
-        console.log('[Home] handleFaceAttendanceTrigger called with type:', type);
         setCameraPurpose(type);
         setShowFaceCamera(true);
-        console.log('[Home] setShowFaceCamera(true) called');
     };
 
     const [isMarkingAttendance, setIsMarkingAttendance] = useState(false);
 
     const handleFaceCaptured = async (uri: string) => {
-        console.log('[handleFaceCaptured] Called with URI:', uri);
-        console.log('[handleFaceCaptured] User employee_id:', user?.employee_id);
-
-        if (!user?.employee_id) {
-            console.log('[handleFaceCaptured] No employee_id, returning early');
-            return;
-        }
+        if (!user?.employee_id) return;
         setIsMarkingAttendance(true);
 
         try {
-            console.log('[handleFaceCaptured] Creating FormData...');
             const formData = new FormData();
             const fileUri = Platform.OS === 'android' ? uri : uri.replace('file://', '');
-            console.log('[handleFaceCaptured] File URI for FormData:', fileUri);
 
             formData.append('file', {
                 uri: fileUri,
@@ -219,11 +241,8 @@ export default function EmployeeHomeScreen() {
             } as any);
 
             const eventTime = new Date().toISOString();
-            console.log('[handleFaceCaptured] Event time:', eventTime);
-            console.log('[handleFaceCaptured] Camera purpose:', cameraPurpose);
 
             if (cameraPurpose === 'geo_attendance') {
-                console.log('[handleFaceCaptured] Requesting location permission...');
                 const { status } = await Location.requestForegroundPermissionsAsync();
                 if (status !== 'granted') {
                     Alert.alert('Permission Denied', 'Location is required for Geo Attendance.');
@@ -231,25 +250,18 @@ export default function EmployeeHomeScreen() {
                     return;
                 }
 
-                console.log('[handleFaceCaptured] Getting current position...');
                 const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-                console.log('[handleFaceCaptured] Location:', location.coords);
 
-                console.log('[handleFaceCaptured] Calling geoPunch API...');
-                const response = await apiClient.faceAttendance.geoPunch(
+                await apiClient.faceAttendance.geoPunch(
                     formData,
                     eventTime,
                     location.coords.latitude,
                     location.coords.longitude
                 );
-                console.log('[handleFaceCaptured] geoPunch API response:', response.data);
             } else {
-                console.log('[handleFaceCaptured] Calling face_attendance/punch API...');
-                const response = await apiClient.faceAttendance.punch(formData, eventTime);
-                console.log('[handleFaceCaptured] punch API response:', response.data);
+                await apiClient.faceAttendance.punch(formData, eventTime);
             }
 
-            console.log('[handleFaceCaptured] Success! Showing alert...');
             Alert.alert('Success', 'Attendance marked successfully!', [
                 {
                     text: 'OK',
@@ -260,20 +272,10 @@ export default function EmployeeHomeScreen() {
                 }
             ]);
         } catch (error: any) {
-            console.log('[handleFaceCaptured] Request failed:', error.message);
-            console.log('[handleFaceCaptured] Error response:', error.response?.data);
-            console.log('[handleFaceCaptured] Error status:', error.response?.status);
-
-            // Check for specific 400 error (e.g. Late check-in not allowed)
             if (error.response?.status === 400) {
-                const message = error.response?.data?.detail || error.response?.data?.message || 'Attendance request rejected.';
-                Alert.alert('Attendance Alert', message, [{ text: 'OK' }]);
+                Alert.alert('Attendance Alert', error.response?.data?.detail || 'Attendance request rejected.');
             } else {
-                Alert.alert(
-                    'Attendance Failed',
-                    error.response?.data?.detail || error.response?.data?.message || 'Failed to mark attendance. Please try again.',
-                    [{ text: 'Try Again' }]
-                );
+                Alert.alert('Attendance Failed', error.response?.data?.detail || 'Failed to mark attendance.');
             }
         } finally {
             setIsMarkingAttendance(false);
@@ -285,16 +287,64 @@ export default function EmployeeHomeScreen() {
         return new Date(timeString).toLocaleTimeString([], {
             hour: '2-digit',
             minute: '2-digit',
-            hour12: false
+            hour12: true
         });
     };
 
+    const formatShiftTime = (timeStr?: string) => {
+        if (!timeStr) return '--:--';
+        const [hours, minutes] = timeStr.split(':');
+        const h = parseInt(hours);
+        const ampm = h >= 12 ? 'PM' : 'AM';
+        const h12 = h % 12 || 12;
+        return `${h12.toString().padStart(2, '0')}:${minutes} ${ampm}`;
+    };
+
     const currentDate = new Date().toLocaleDateString('en-US', {
-        weekday: 'short', month: 'short', day: 'numeric'
+        weekday: 'long', month: 'short', day: 'numeric'
+    });
+
+    const getAttendanceStatus = () => {
+        if (!data.todayAttendance?.check_in) return { text: 'Not Checked In', color: Colors.text.tertiary };
+        if (data.todayAttendance?.status === 'late') return { text: 'Late', color: Colors.accent.orange };
+        return { text: 'On Time', color: Colors.accent.green };
+    };
+
+    const status = getAttendanceStatus();
+
+    const rippleScale = rippleAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [1, 1.5],
+    });
+
+    const rippleOpacity = rippleAnim.interpolate({
+        inputRange: [0, 0.7, 1],
+        outputRange: [0.4, 0, 0],
     });
 
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
+            {/* Header */}
+            <View style={styles.header}>
+                <View style={styles.headerLeft}>
+                    <View style={styles.avatarWrapper}>
+                        <Image
+                            source={{ uri: `https://api.dicebear.com/7.x/avataaars/png?seed=${user?.first_name || 'User'}` }}
+                            style={styles.avatar}
+                        />
+                        <View style={styles.onlineBadge} />
+                    </View>
+                    <View>
+                        <Text style={styles.welcomeText}>WELCOME BACK</Text>
+                        <Text style={styles.userName}>{user?.first_name || 'Employee'} {user?.last_name || ''}</Text>
+                    </View>
+                </View>
+                <TouchableOpacity style={styles.notificationBtn}>
+                    <Icon name="bell" size={22} color={Colors.text.primary} />
+                    <View style={styles.notificationDot} />
+                </TouchableOpacity>
+            </View>
+
             <ScrollView
                 style={styles.scrollView}
                 contentContainerStyle={styles.content}
@@ -303,194 +353,140 @@ export default function EmployeeHomeScreen() {
                 }
                 showsVerticalScrollIndicator={false}
             >
-                {/* Header */}
-                <View style={styles.header}>
-                    <View>
-                        <Text style={styles.dateText}>{currentDate}</Text>
-                        <Text style={styles.greeting}>Welcome back,</Text>
-                        <Text style={styles.userName}>{user?.first_name || 'Employee'} {user?.last_name || ''}</Text>
-                    </View>
-                    <View style={styles.profileContainer}>
-                        <Image
-                            source={{ uri: `https://api.dicebear.com/7.x/avataaars/png?seed=${user?.first_name || 'User'}` }}
-                            style={styles.avatar}
-                        />
-                        <View style={styles.onlineBadge} />
-                    </View>
-                </View>
-
-                {/* Today's Status Card */}
-                <View style={styles.statusCard}>
-                    <View style={styles.statusHeader}>
-                        <View>
-                            <Text style={styles.statusTitle}>Today's Status</Text>
-                            <Text style={styles.shiftText}>
-                                {data.currentShift?.shift_name || 'Regular Shift'} • {data.currentShift?.start_time || '09:00'} - {data.currentShift?.end_time || '17:00'}
-                            </Text>
-                        </View>
-                        <View style={styles.calendarIconBg}>
-                            <Icon name="calendar" size={24} color={Colors.primary[600]} />
+                {/* Date & Shift Info */}
+                <View style={styles.dateSection}>
+                    <View style={styles.dateRow}>
+                        <Text style={styles.dateText}>Today, {currentDate.split(',')[1]?.trim()}</Text>
+                        <View style={[styles.statusBadge, { backgroundColor: status.color + '20' }]}>
+                            <Text style={[styles.statusText, { color: status.color }]}>{status.text}</Text>
                         </View>
                     </View>
-
-                    <View style={styles.statusMetrics}>
-                        <View style={styles.metricItem}>
-                            <Text style={styles.metricLabel}>CHECK IN</Text>
-                            <Text style={[styles.metricValue, isCheckedIn ? styles.textPrimary : styles.textInactive]}>
-                                {formatTime(data.todayAttendance?.check_in)}
-                            </Text>
-                        </View>
-                        <View style={styles.metricDivider} />
-                        <View style={styles.metricItem}>
-                            <Text style={styles.metricLabel}>CHECK OUT</Text>
-                            <Text style={[styles.metricValue, !isCheckedIn && data.todayAttendance?.check_out ? styles.textPrimary : styles.textInactive]}>
-                                {formatTime(data.todayAttendance?.check_out)}
-                            </Text>
-                        </View>
-                        <View style={styles.metricDivider} />
-                        <View style={[styles.metricItem, { alignItems: 'flex-end' }]}>
-                            <Text style={styles.metricLabel}>DURATION</Text>
-                            <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-                                <Text style={styles.metricValuePrimary}>{duration}</Text>
-                                <Text style={styles.metricUnit}>h</Text>
-                            </View>
-                        </View>
+                    <View style={styles.shiftRow}>
+                        <Icon name="clock" size={16} color={Colors.primary[600]} />
+                        <Text style={styles.shiftText}>
+                            Shift: {formatShiftTime(data.currentShift?.start_time)} - {formatShiftTime(data.currentShift?.end_time)}
+                        </Text>
                     </View>
                 </View>
 
-                {/* Manual Punch Button */}
-                <TouchableOpacity
-                    style={[
-                        styles.punchButton,
-                        isCheckedIn ? styles.punchButtonOut : styles.punchButtonIn
-                    ]}
-                    onPress={handleManualPunch}
-                    activeOpacity={0.9}
-                >
-                    <LinearGradient
-                        colors={isCheckedIn
-                            ? ['rgba(255,255,255,0.2)', 'transparent']
-                            : ['rgba(255,255,255,0.2)', 'transparent']
-                        }
-                        style={StyleSheet.absoluteFill}
-                    />
-                    <View style={styles.punchIconCircle}>
-                        <Icon
-                            name={isCheckedIn ? 'clock' : 'clock'}
-                            size={28}
-                            color={Colors.text.inverse}
-                        />
-                    </View>
-                    <Text style={styles.punchButtonText}>
-                        {isCheckedIn ? 'Punch Out' : 'Punch In'}
-                    </Text>
-                </TouchableOpacity>
+                {/* Central Attendance Card */}
+                <View style={styles.attendanceCard}>
+                    <View style={styles.attendanceCardBg} />
+                    <View style={styles.attendanceContent}>
+                        {/* Status Text */}
+                        <View style={styles.currentStatus}>
+                            <Text style={styles.currentStatusLabel}>Current Status</Text>
+                            <Text style={styles.currentStatusText}>
+                                {isCheckedIn ? 'Checked In' : 'Checked Out'}
+                            </Text>
+                        </View>
 
-                {/* Attendance Actions Grid */}
-                <View style={styles.gridContainer}>
+                        {/* Hero Punch Button */}
+                        <View style={styles.punchButtonContainer}>
+                            {/* Ripple Effect */}
+                            <Animated.View
+                                style={[
+                                    styles.rippleEffect,
+                                    {
+                                        transform: [{ scale: rippleScale }],
+                                        opacity: rippleOpacity,
+                                    },
+                                ]}
+                            />
+                            <TouchableOpacity
+                                style={styles.punchButton}
+                                onPress={handleManualPunch}
+                                activeOpacity={0.9}
+                            >
+                                <LinearGradient
+                                    colors={['#3b9eff', '#137fec']}
+                                    style={StyleSheet.absoluteFill}
+                                    start={{ x: 0.5, y: 0 }}
+                                    end={{ x: 0.5, y: 1 }}
+                                />
+                                <Icon name="hand-pointer" size={36} color="#fff" />
+                                <Text style={styles.punchButtonText}>
+                                    {isCheckedIn ? 'PUNCH OUT' : 'PUNCH IN'}
+                                </Text>
+                                <Text style={styles.punchTimeHint}>
+                                    {formatShiftTime(data.currentShift?.start_time)}
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
+
+                        {/* Location Hint */}
+                        <View style={styles.locationHint}>
+                            <Icon name="map-pin" size={12} color={Colors.text.tertiary} />
+                            <Text style={styles.locationText}>Near Office HQ</Text>
+                        </View>
+                    </View>
+                </View>
+
+                {/* Stats Grid */}
+                <View style={styles.statsGrid}>
+                    <View style={styles.statCard}>
+                        <View style={[styles.statIcon, { backgroundColor: '#EBF5FF' }]}>
+                            <Icon name="log-in" size={18} color={Colors.primary[600]} />
+                        </View>
+                        <Text style={styles.statLabel}>Clock In</Text>
+                        <Text style={styles.statValue}>{formatTime(data.todayAttendance?.check_in)}</Text>
+                    </View>
+                    <View style={styles.statCard}>
+                        <View style={[styles.statIcon, { backgroundColor: '#FFF7ED' }]}>
+                            <Icon name="log-out" size={18} color={Colors.accent.orange} />
+                        </View>
+                        <Text style={styles.statLabel}>Clock Out</Text>
+                        <Text style={styles.statValue}>{formatTime(data.todayAttendance?.check_out)}</Text>
+                    </View>
+                    <View style={styles.statCard}>
+                        <View style={[styles.statIcon, { backgroundColor: '#F5F3FF' }]}>
+                            <Icon name="hourglass" size={18} color="#8B5CF6" />
+                        </View>
+                        <Text style={styles.statLabel}>Total Hrs</Text>
+                        <Text style={styles.statValue}>{duration}</Text>
+                    </View>
+                </View>
+
+                {/* Secondary Actions */}
+                <View style={styles.actionsGrid}>
                     <TouchableOpacity
-                        style={[styles.gridButton, styles.bgBlue]}
+                        style={styles.actionCard}
                         onPress={() => handleFaceAttendanceTrigger('attendance')}
                     >
-                        <Icon name="camera" size={28} color={Colors.text.inverse} />
-                        <Text style={styles.gridButtonText}>Face Attendance</Text>
+                        <View style={[styles.actionIcon, { backgroundColor: '#EEF2FF' }]}>
+                            <Icon name="camera" size={20} color="#6366F1" />
+                        </View>
+                        <View>
+                            <Text style={styles.actionTitle}>Face Scan</Text>
+                            <Text style={styles.actionSubtitle}>Verify ID</Text>
+                        </View>
                     </TouchableOpacity>
 
                     <TouchableOpacity
-                        style={[styles.gridButton, styles.bgIndigo]}
+                        style={styles.actionCard}
                         onPress={() => handleFaceAttendanceTrigger('geo_attendance')}
                     >
-                        <Icon name="map-pin" size={28} color={Colors.text.inverse} />
-                        <Text style={styles.gridButtonText}>Geo Attendance</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                        style={[styles.gridButtonFull, styles.registerButton]}
-                        onPress={() => setShowOnboardModal(true)}
-                    >
-                        <Icon name="user-plus" size={24} color={Colors.text.secondary} />
-                        <Text style={styles.registerButtonText}>Register Face</Text>
+                        <View style={[styles.actionIcon, { backgroundColor: '#F0FDFA' }]}>
+                            <Icon name="map" size={20} color="#14B8A6" />
+                        </View>
+                        <View>
+                            <Text style={styles.actionTitle}>Geo Log</Text>
+                            <Text style={styles.actionSubtitle}>Location Check</Text>
+                        </View>
                     </TouchableOpacity>
                 </View>
 
-                {/* Leave Balance */}
-                <View style={styles.sectionCard}>
-                    <View style={styles.sectionHeader}>
-                        <Text style={styles.sectionTitle}>Leave Balance</Text>
-                        <TouchableOpacity onPress={() => router.push('/(employee)/my-leaves')}>
-                            <Text style={styles.linkText}>View All</Text>
-                        </TouchableOpacity>
-                    </View>
+                {/* Register Face Button */}
+                <TouchableOpacity
+                    style={styles.registerFaceBtn}
+                    onPress={() => setShowOnboardModal(true)}
+                >
+                    <Icon name="user-plus" size={20} color={Colors.text.secondary} />
+                    <Text style={styles.registerFaceText}>Register Face</Text>
+                </TouchableOpacity>
 
-                    <View style={styles.leaveRow}>
-                        <View style={styles.leaveItem}>
-                            <Text style={styles.leaveValue}>{data.leaveBalance.annual}</Text>
-                            <Text style={styles.leaveLabel}>Annual</Text>
-                        </View>
-                        <View style={styles.verticalDivider} />
-                        <View style={styles.leaveItem}>
-                            <Text style={styles.leaveValue}>{data.leaveBalance.sick}</Text>
-                            <Text style={styles.leaveLabel}>Sick</Text>
-                        </View>
-                        <View style={styles.verticalDivider} />
-                        <View style={styles.leaveItem}>
-                            {data.pendingLeaves > 0 && (
-                                <View style={styles.badgeContainer}>
-                                    <Text style={styles.badgeText}>{data.pendingLeaves} Pending</Text>
-                                </View>
-                            )}
-                            <Text style={styles.leaveValue}>{data.leaveBalance.personal}</Text>
-                            <Text style={styles.leaveLabel}>Personal</Text>
-                        </View>
-                    </View>
-                </View>
-
-                {/* Quick Links */}
-                <View style={styles.quickLinksContainer}>
-                    <Text style={styles.linksTitle}>Quick Links</Text>
-                    <View style={styles.linksList}>
-                        <TouchableOpacity style={styles.linkRow} onPress={() => router.push('/(employee)/my-attendance')}>
-                            <View style={[styles.linkIconBg, { backgroundColor: Colors.primary[50] }]}>
-                                <Icon name="calendar" size={20} color={Colors.primary[600]} />
-                            </View>
-                            <View style={styles.linkContent}>
-                                <Text style={styles.linkTitle}>Attendance History</Text>
-                                <Text style={styles.linkSubtitle}>View past records</Text>
-                            </View>
-                            <Icon name="chevron-right" size={20} color={Colors.text.tertiary} />
-                        </TouchableOpacity>
-
-                        <View style={styles.separator} />
-
-                        <TouchableOpacity style={styles.linkRow} onPress={() => router.push('/(employee)/my-payslips')}>
-                            <View style={[styles.linkIconBg, { backgroundColor: Colors.success.light }]}>
-                                <Icon name="wallet" size={20} color={Colors.success.dark} />
-                            </View>
-                            <View style={styles.linkContent}>
-                                <Text style={styles.linkTitle}>Payslips</Text>
-                                <Text style={styles.linkSubtitle}>Download PDFs</Text>
-                            </View>
-                            <Icon name="chevron-right" size={20} color={Colors.text.tertiary} />
-                        </TouchableOpacity>
-
-                        <View style={styles.separator} />
-
-                        <TouchableOpacity style={styles.linkRow} onPress={() => router.push('/(employee)/my-shift')}>
-                            <View style={[styles.linkIconBg, { backgroundColor: Colors.warning.light }]}>
-                                <Icon name="clock" size={20} color={Colors.warning.dark} />
-                            </View>
-                            <View style={styles.linkContent}>
-                                <Text style={styles.linkTitle}>Shift Details</Text>
-                                <Text style={styles.linkSubtitle}>Upcoming schedule</Text>
-                            </View>
-                            <Icon name="chevron-right" size={20} color={Colors.text.tertiary} />
-                        </TouchableOpacity>
-                    </View>
-                </View>
-
-                {/* Add some bottom padding */}
-                <View style={{ height: Spacing['4xl'] }} />
-
+                {/* Bottom padding */}
+                <View style={{ height: 100 }} />
             </ScrollView>
 
             <FaceCamera
@@ -517,40 +513,25 @@ export default function EmployeeHomeScreen() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: Colors.background.secondary,
+        backgroundColor: '#f6f7f8',
     },
-    scrollView: {
-        flex: 1,
-    },
-    content: {
-        padding: Spacing.xl,
-        gap: Spacing.xl,
-    },
-    // Header
     header: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
+        paddingHorizontal: 20,
+        paddingVertical: 16,
+        backgroundColor: '#fff',
+        borderBottomLeftRadius: 16,
+        borderBottomRightRadius: 16,
+        ...Shadows.sm,
     },
-    dateText: {
-        fontSize: Typography.size.sm,
-        color: Colors.text.tertiary,
-        fontWeight: '500',
-        marginBottom: 2,
+    headerLeft: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
     },
-    greeting: {
-        fontSize: Typography.size.lg,
-        fontWeight: '700',
-        color: Colors.text.primary,
-        lineHeight: 28,
-    },
-    userName: {
-        fontSize: Typography.size.lg,
-        fontWeight: '700',
-        color: Colors.text.primary,
-        lineHeight: 28,
-    },
-    profileContainer: {
+    avatarWrapper: {
         position: 'relative',
     },
     avatar: {
@@ -558,297 +539,250 @@ const styles = StyleSheet.create({
         height: 48,
         borderRadius: 24,
         borderWidth: 2,
-        borderColor: Colors.background.primary,
-        backgroundColor: Colors.border.light,
+        borderColor: '#137fec',
     },
     onlineBadge: {
         position: 'absolute',
         bottom: 0,
         right: 0,
-        width: 14,
-        height: 14,
-        backgroundColor: Colors.success.main,
-        borderRadius: 7,
+        width: 12,
+        height: 12,
+        backgroundColor: '#22c55e',
+        borderRadius: 6,
         borderWidth: 2,
-        borderColor: Colors.background.primary,
+        borderColor: '#fff',
     },
-
-    // Status Card
-    statusCard: {
-        backgroundColor: Colors.background.primary,
-        borderRadius: BorderRadius['3xl'],
-        padding: Spacing.xl,
-        ...Shadows.sm,
-        borderWidth: 1,
-        borderColor: Colors.border.light,
-    },
-    statusHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'flex-start',
-        marginBottom: Spacing.lg,
-    },
-    statusTitle: {
-        fontSize: Typography.size.lg,
-        fontWeight: '700',
-        color: Colors.text.primary,
-    },
-    shiftText: {
-        fontSize: Typography.size.sm,
-        color: Colors.text.secondary,
-        fontWeight: '500',
-        marginTop: 4,
-    },
-    calendarIconBg: {
-        backgroundColor: Colors.primary[50], // primary/10
-        padding: Spacing.sm,
-        borderRadius: BorderRadius.lg,
-    },
-    statusMetrics: {
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-    metricItem: {
-        flex: 1,
-        gap: 4,
-    },
-    metricLabel: {
+    welcomeText: {
         fontSize: 10,
-        fontWeight: '600',
-        color: Colors.text.tertiary,
-        textTransform: 'uppercase',
-        letterSpacing: 0.5,
-    },
-    metricValue: {
-        fontSize: Typography.size['2xl'],
-        fontWeight: '700',
-        fontVariant: ['tabular-nums'],
-    },
-    metricValuePrimary: {
-        fontSize: Typography.size['2xl'],
-        fontWeight: '700',
-        color: Colors.text.primary,
-        fontVariant: ['tabular-nums'],
-    },
-    textPrimary: {
-        color: Colors.text.primary,
-    },
-    textInactive: {
-        color: Colors.text.tertiary,
-    },
-    metricUnit: {
-        fontSize: Typography.size.sm,
-        color: Colors.text.tertiary,
-        marginLeft: 2,
-        marginBottom: 4,
-    },
-    metricDivider: {
-        width: 1,
-        height: '80%',
-        backgroundColor: Colors.border.light,
-        marginHorizontal: Spacing.md,
-    },
-
-    // Punch Button
-    punchButton: {
-        borderRadius: BorderRadius['2xl'],
-        padding: Spacing.lg,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: Spacing.md,
-        ...Shadows.md,
-        overflow: 'hidden',
-        height: 72,
-    },
-    punchButtonIn: {
-        backgroundColor: Colors.accent.green, // Emerald 500 equivalent
-        shadowColor: Colors.accent.green,
-    },
-    punchButtonOut: {
-        backgroundColor: Colors.accent.red, // Rose 500 equivalent
-        shadowColor: Colors.accent.red,
-    },
-    punchIconCircle: {
-        backgroundColor: 'rgba(255,255,255,0.2)',
-        padding: 8,
-        borderRadius: BorderRadius.full,
-    },
-    punchButtonText: {
-        color: Colors.text.inverse,
-        fontSize: Typography.size.xl,
-        fontWeight: '700',
-        letterSpacing: 0.5,
-    },
-
-    // Grid Actions
-    gridContainer: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        gap: Spacing.md,
-    },
-    gridButton: {
-        flex: 1,
-        minWidth: (width - 64) / 2, // 2 columns accounting for padding (32*2)
-        borderRadius: BorderRadius['2xl'],
-        padding: Spacing.lg,
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: Spacing.sm,
-        height: 100,
-        ...Shadows.md,
-    },
-    gridButtonFull: {
-        width: '100%',
-        borderRadius: BorderRadius['2xl'],
-        padding: Spacing.lg,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: Spacing.md,
-        height: 56,
-    },
-    bgBlue: {
-        backgroundColor: '#3B82F6', // Blue 500
-        shadowColor: '#3B82F6',
-    },
-    bgIndigo: {
-        backgroundColor: Colors.primary[600],
-        shadowColor: Colors.primary[600],
-    },
-    gridButtonText: {
-        color: Colors.text.inverse,
-        fontSize: 10,
-        fontWeight: '700',
-        textTransform: 'uppercase',
-        textAlign: 'center',
-    },
-    registerButton: {
-        backgroundColor: Colors.background.primary,
-        borderWidth: 2,
-        borderColor: Colors.border.light,
-        borderStyle: 'dashed',
-    },
-    registerButtonText: {
-        color: Colors.text.secondary,
-        fontSize: Typography.size.sm,
-        fontWeight: '700',
-    },
-
-    // Section Card (Leave Balance)
-    sectionCard: {
-        backgroundColor: Colors.background.primary,
-        borderRadius: BorderRadius['3xl'],
-        padding: Spacing.lg,
-        ...Shadows.sm,
-        borderWidth: 1,
-        borderColor: Colors.border.light,
-    },
-    sectionHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: Spacing.lg,
-    },
-    sectionTitle: {
-        fontSize: Typography.size.md,
-        fontWeight: '700',
-        color: Colors.text.primary,
-    },
-    linkText: {
-        fontSize: Typography.size.xs,
-        fontWeight: '700',
-        color: Colors.primary[600],
-    },
-    leaveRow: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-    },
-    leaveItem: {
-        flex: 1,
-        alignItems: 'center',
-        position: 'relative',
-    },
-    leaveValue: {
-        fontSize: Typography.size['2xl'],
-        fontWeight: '800',
-        color: Colors.text.primary,
-    },
-    leaveLabel: {
-        fontSize: Typography.size.xs,
         fontWeight: '500',
-        color: Colors.text.secondary,
+        color: Colors.text.tertiary,
+        letterSpacing: 1,
+        textTransform: 'uppercase',
     },
-    verticalDivider: {
-        width: 1,
-        height: 32,
-        backgroundColor: Colors.border.light,
-    },
-    badgeContainer: {
-        position: 'absolute',
-        top: -12,
-        right: 0,
-        backgroundColor: Colors.accent.red,
-        paddingHorizontal: 6,
-        paddingVertical: 2,
-        borderRadius: BorderRadius.full,
-        borderWidth: 2,
-        borderColor: Colors.background.primary,
-        zIndex: 1,
-    },
-    badgeText: {
-        color: Colors.text.inverse,
-        fontSize: 9,
-        fontWeight: '700',
-    },
-
-    // Quick Links
-    quickLinksContainer: {
-        gap: Spacing.md,
-    },
-    linksTitle: {
-        fontSize: Typography.size.md,
+    userName: {
+        fontSize: 16,
         fontWeight: '700',
         color: Colors.text.primary,
-        paddingHorizontal: Spacing.xs,
     },
-    linksList: {
-        backgroundColor: Colors.background.primary,
-        borderRadius: BorderRadius['2xl'],
-        borderWidth: 1,
-        borderColor: Colors.border.light,
-        ...Shadows.sm,
-        overflow: 'hidden',
-    },
-    linkRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        padding: Spacing.lg,
-    },
-    linkIconBg: {
+    notificationBtn: {
         width: 40,
         height: 40,
-        borderRadius: BorderRadius.full,
+        borderRadius: 20,
+        backgroundColor: '#f1f5f9',
         alignItems: 'center',
         justifyContent: 'center',
     },
-    linkContent: {
-        flex: 1,
-        marginLeft: Spacing.md,
+    notificationDot: {
+        position: 'absolute',
+        top: 10,
+        right: 10,
+        width: 8,
+        height: 8,
+        backgroundColor: '#ef4444',
+        borderRadius: 4,
+        borderWidth: 1,
+        borderColor: '#f1f5f9',
     },
-    linkTitle: {
-        fontSize: Typography.size.sm,
+    scrollView: {
+        flex: 1,
+    },
+    content: {
+        padding: 20,
+        gap: 20,
+    },
+    dateSection: {
+        gap: 8,
+    },
+    dateRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    dateText: {
+        fontSize: 22,
         fontWeight: '700',
         color: Colors.text.primary,
     },
-    linkSubtitle: {
-        fontSize: Typography.size.xs,
+    statusBadge: {
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 20,
+    },
+    statusText: {
+        fontSize: 11,
+        fontWeight: '600',
+    },
+    shiftRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+    },
+    shiftText: {
+        fontSize: 14,
+        fontWeight: '500',
         color: Colors.text.secondary,
     },
-    separator: {
-        height: 1,
-        backgroundColor: Colors.border.light,
-        marginLeft: 72, // Align with text
+    attendanceCard: {
+        backgroundColor: '#fff',
+        borderRadius: 16,
+        padding: 24,
+        ...Shadows.md,
+        overflow: 'hidden',
+    },
+    attendanceCardBg: {
+        position: 'absolute',
+        top: -40,
+        right: -40,
+        width: 128,
+        height: 128,
+        borderRadius: 64,
+        backgroundColor: 'rgba(19, 127, 236, 0.05)',
+    },
+    attendanceContent: {
+        alignItems: 'center',
+        gap: 24,
+    },
+    currentStatus: {
+        alignItems: 'center',
+        gap: 4,
+    },
+    currentStatusLabel: {
+        fontSize: 13,
+        fontWeight: '500',
+        color: Colors.text.tertiary,
+    },
+    currentStatusText: {
+        fontSize: 20,
+        fontWeight: '700',
+        color: Colors.text.primary,
+    },
+    punchButtonContainer: {
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    rippleEffect: {
+        position: 'absolute',
+        width: 160,
+        height: 160,
+        borderRadius: 80,
+        backgroundColor: 'rgba(19, 127, 236, 0.2)',
+    },
+    punchButton: {
+        width: 160,
+        height: 160,
+        borderRadius: 80,
+        alignItems: 'center',
+        justifyContent: 'center',
+        overflow: 'hidden',
+        ...Shadows.lg,
+        shadowColor: '#137fec',
+    },
+    punchButtonText: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#fff',
+        marginTop: 4,
+        letterSpacing: 0.5,
+    },
+    punchTimeHint: {
+        fontSize: 10,
+        color: 'rgba(255,255,255,0.8)',
+        marginTop: 4,
+        fontWeight: '500',
+    },
+    locationHint: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        backgroundColor: '#f8fafc',
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 20,
+    },
+    locationText: {
+        fontSize: 11,
+        color: Colors.text.tertiary,
+    },
+    statsGrid: {
+        flexDirection: 'row',
+        gap: 12,
+    },
+    statCard: {
+        flex: 1,
+        backgroundColor: '#fff',
+        borderRadius: 16,
+        padding: 16,
+        alignItems: 'center',
+        gap: 6,
+        ...Shadows.sm,
+        borderWidth: 1,
+        borderColor: '#f1f5f9',
+    },
+    statIcon: {
+        width: 36,
+        height: 36,
+        borderRadius: 10,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 4,
+    },
+    statLabel: {
+        fontSize: 11,
+        fontWeight: '500',
+        color: Colors.text.tertiary,
+    },
+    statValue: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: Colors.text.primary,
+    },
+    actionsGrid: {
+        flexDirection: 'row',
+        gap: 12,
+    },
+    actionCard: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        backgroundColor: '#fff',
+        borderRadius: 16,
+        padding: 16,
+        ...Shadows.sm,
+        borderWidth: 1,
+        borderColor: '#f1f5f9',
+    },
+    actionIcon: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    actionTitle: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: Colors.text.primary,
+    },
+    actionSubtitle: {
+        fontSize: 11,
+        color: Colors.text.tertiary,
+    },
+    registerFaceBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        backgroundColor: '#fff',
+        borderRadius: 16,
+        padding: 16,
+        borderWidth: 2,
+        borderColor: '#e2e8f0',
+        borderStyle: 'dashed',
+    },
+    registerFaceText: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: Colors.text.secondary,
     },
 });
