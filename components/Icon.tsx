@@ -66,10 +66,29 @@ const iconMap: Record<string, keyof typeof MaterialCommunityIcons.glyphMap> = {
     'refresh-cw': 'refresh',
     'map-pin': 'map-marker',
     'user-plus': 'account-plus',
-    'camera': 'camera', // Ensure camera is mapped if used
+    'camera': 'camera',
     'lock': 'lock',
     'server': 'server',
     'database': 'database',
+
+    // New icons for premium UI
+    'bell': 'bell',
+    'log-in': 'login',
+    'log-out': 'logout',
+    'hourglass': 'timer-sand',
+    'map': 'map',
+    'hand-pointer': 'hand-back-right',
+    'x-circle': 'close-circle',
+    'help-circle': 'help-circle',
+    'umbrella': 'umbrella',
+    'thermometer': 'thermometer',
+    'award': 'medal',
+    'send': 'send',
+    'edit-2': 'pencil',
+    'moon': 'weather-night',
+    'mail': 'email',
+    'file-text': 'file-document',
+    'alert-triangle': 'alert',
 };
 
 interface IconProps {

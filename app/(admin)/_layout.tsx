@@ -105,6 +105,18 @@ export default function AdminLayout() {
                     href: null,
                 }}
             />
+            <Tabs.Screen
+                name="reconciliation"
+                options={{
+                    href: null,
+                }}
+            />
+            <Tabs.Screen
+                name="workflows"
+                options={{
+                    href: null,
+                }}
+            />
         </Tabs>
     );
 }
