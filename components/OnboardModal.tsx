@@ -70,32 +70,34 @@ export default function OnboardModal({ visible, onClose, onSuccess }: OnboardMod
         try {
             const formData = new FormData();
 
-            // Append file
+            // Append file (only the file goes in FormData)
             formData.append('file', {
                 uri: Platform.OS === 'android' ? uri : uri.replace('file://', ''),
                 name: `photo_${photoStep}.jpg`,
                 type: 'image/jpeg',
             } as any);
 
-            // Append common data
-            formData.append('photo_type', photoStep);
+            // Build query params object (these go in URL, not FormData)
+            const queryParams: any = {
+                photo_type: photoStep,
+            };
 
             if (photoStep === 'front') {
                 // First step data
-                formData.append('first_name', firstName);
-                formData.append('last_name', lastName);
-                formData.append('phone', phone);
-                formData.append('lat', location!.lat.toString());
-                formData.append('lng', location!.lng.toString());
-                formData.append('radius_m', '100'); // Default radius
+                queryParams.first_name = firstName;
+                queryParams.last_name = lastName;
+                queryParams.phone = phone;
+                queryParams.lat = location!.lat.toString();
+                queryParams.lng = location!.lng.toString();
+                queryParams.radius_m = '100'; // Default radius
             } else {
                 // Subsequent steps need employee_id
                 if (!employeeId) throw new Error('Employee ID missing for subsequent photos');
-                formData.append('employee_id', employeeId);
+                queryParams.employee_id = employeeId;
             }
 
-            console.log('Uploading photo:', photoStep);
-            const response = await apiClient.faces.onboard(formData);
+            console.log('Uploading photo:', photoStep, 'with params:', queryParams);
+            const response = await apiClient.faces.onboard(formData, queryParams);
             console.log('Upload success:', response.data);
 
             if (photoStep === 'front') {

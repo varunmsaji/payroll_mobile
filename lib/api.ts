@@ -168,10 +168,11 @@ export const apiClient = {
 
     // Face Registration
     faces: {
-        onboard: (data: FormData) => api.post('/faces/onboard', data, {
+        onboard: (data: FormData, params?: any) => api.post('/faces/onboard', data, {
             headers: {
                 'Content-Type': 'multipart/form-data',
             },
+            params, // Query parameters
         }),
     },
 

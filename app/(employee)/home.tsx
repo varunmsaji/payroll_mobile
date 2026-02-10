@@ -56,6 +56,7 @@ export default function EmployeeHomeScreen() {
     // Face Attendance State
     const [showFaceCamera, setShowFaceCamera] = useState(false);
     const [cameraPurpose, setCameraPurpose] = useState<'attendance' | 'geo_attendance'>('attendance');
+    const cameraPurposeRef = useRef<'attendance' | 'geo_attendance'>('attendance');
     const [showOnboardModal, setShowOnboardModal] = useState(false);
 
     // Ripple animation
@@ -220,10 +221,9 @@ export default function EmployeeHomeScreen() {
     };
 
     const handleFaceAttendanceTrigger = (type: 'attendance' | 'geo_attendance') => {
-        console.log('[Home] handleFaceAttendanceTrigger called with type:', type);
         setCameraPurpose(type);
+        cameraPurposeRef.current = type;
         setShowFaceCamera(true);
-        console.log('[Home] setShowFaceCamera(true) called');
     };
 
     const [isMarkingAttendance, setIsMarkingAttendance] = useState(false);
@@ -232,8 +232,11 @@ export default function EmployeeHomeScreen() {
         if (!user?.employee_id) return;
         setIsMarkingAttendance(true);
 
+        // Read from ref to avoid stale closure issues
+        const purpose = cameraPurposeRef.current;
+        console.log('[handleFaceCaptured] purpose:', purpose);
+
         try {
-            console.log('[handleFaceCaptured] Creating FormData...');
             const formData = new FormData();
             const fileUri = Platform.OS === 'android' ? uri : uri.replace('file://', '');
 
@@ -244,11 +247,9 @@ export default function EmployeeHomeScreen() {
             } as any);
 
             const eventTime = new Date().toISOString();
-            console.log('[handleFaceCaptured] Event time:', eventTime);
-            console.log('[handleFaceCaptured] Camera purpose:', cameraPurpose);
 
-            if (cameraPurpose === 'geo_attendance') {
-                console.log('[handleFaceCaptured] Requesting location permission...');
+            if (purpose === 'geo_attendance') {
+                console.log('[handleFaceCaptured] Taking GEO path -> /geo_punch');
                 const { status } = await Location.requestForegroundPermissionsAsync();
                 if (status !== 'granted') {
                     Alert.alert('Permission Denied', 'Location is required for Geo Attendance.');
@@ -256,7 +257,6 @@ export default function EmployeeHomeScreen() {
                     return;
                 }
 
-                console.log('[handleFaceCaptured] Getting current position...');
                 const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
 
                 await apiClient.faceAttendance.geoPunch(
@@ -265,11 +265,9 @@ export default function EmployeeHomeScreen() {
                     location.coords.latitude,
                     location.coords.longitude
                 );
-                console.log('[handleFaceCaptured] geoPunch API response:', response.data);
             } else {
-                console.log('[handleFaceCaptured] Calling face_attendance/punch API...');
-                const response = await apiClient.faceAttendance.punch(formData, eventTime);
-                console.log('[handleFaceCaptured] punch API response:', response.data);
+                console.log('[handleFaceCaptured] Taking FACE path -> /punch');
+                await apiClient.faceAttendance.punch(formData, eventTime);
             }
 
             Alert.alert('Success', 'Attendance marked successfully!', [
@@ -525,7 +523,6 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: '#f6f7f8',
     },
-    // Header
     header: {
         flexDirection: 'row',
         justifyContent: 'space-between',
