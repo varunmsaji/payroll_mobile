@@ -32,10 +32,20 @@ export default function MyAttendanceScreen() {
 
         setError(null);
 
+        // Calculate date range based on selected month
+        const startDate = new Date(selectedMonth.getFullYear(), selectedMonth.getMonth(), 1);
+        const endDate = new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() + 1, 0);
+
+        const startDateStr = startDate.toISOString().split('T')[0];
+        const endDateStr = endDate.toISOString().split('T')[0];
+
         try {
-            const response = await apiClient.attendance.list({
-                employee_id: user.employee_id,
-            });
+            // Use new endpoint with date range parameters
+            const response = await apiClient.attendance.getEmployeeRange(
+                user.employee_id,
+                startDateStr,
+                endDateStr
+            );
 
             // Safely handle response data
             const rawRecords = response?.data;
@@ -62,7 +72,7 @@ export default function MyAttendanceScreen() {
             setIsLoading(false);
             setRefreshing(false);
         }
-    }, [user?.employee_id]);
+    }, [user?.employee_id, selectedMonth]);
 
     useEffect(() => {
         fetchAttendance();
@@ -139,9 +149,11 @@ export default function MyAttendanceScreen() {
     };
 
     const calculateWorkHours = (record: Attendance) => {
-        if (record.work_hours) {
-            const h = Math.floor(record.work_hours);
-            const m = Math.round((record.work_hours - h) * 60);
+        // Use net_hours from new API, fallback to work_hours for legacy
+        const hours = record.net_hours ?? record.work_hours;
+        if (hours) {
+            const h = Math.floor(hours);
+            const m = Math.round((hours - h) * 60);
             return `${h}h ${m.toString().padStart(2, '0')}m`;
         }
         return '--:--';

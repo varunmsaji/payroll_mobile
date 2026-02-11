@@ -18,11 +18,22 @@ import { Icon } from '../../components/Icon';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '../../constants/theme';
 import { apiClient } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
-import { Leave } from '../../types';
+import { LeaveType, LeaveBalance as LeaveBalanceType, LeaveRequest } from '../../types';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-const LEAVE_TYPES = ['Annual', 'Sick', 'Casual', 'Unpaid'];
+// Helper function to get UI config for leave types
+const getLeaveTypeConfig = (typeName: string) => {
+    const typeNameLower = typeName.toLowerCase();
+    if (typeNameLower.includes('annual') || typeNameLower.includes('casual')) {
+        return { icon: 'umbrella', color: '#3B82F6', bgColor: '#EFF6FF', description: 'Paid vacation & personal time' };
+    } else if (typeNameLower.includes('sick')) {
+        return { icon: 'thermometer', color: '#F43F5E', bgColor: '#FFF1F2', description: 'Medical & health recovery' };
+    } else if (typeNameLower.includes('earned')) {
+        return { icon: 'award', color: '#14B8A6', bgColor: '#F0FDFA', description: 'Accumulated based on work' };
+    }
+    return { icon: 'calendar', color: '#6366F1', bgColor: '#EEF2FF', description: 'Leave type' };
+};
 
 interface LeaveBalance {
     type: string;
@@ -40,14 +51,17 @@ export default function MyLeavesScreen() {
     const [isLoading, setIsLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [leaves, setLeaves] = useState<Leave[]>([]);
+    const [leaves, setLeaves] = useState<LeaveRequest[]>([]);
     const [showApplyModal, setShowApplyModal] = useState(false);
 
-    // Balances - start with empty, will be populated from API
+    // Leave types from API
+    const [leaveTypes, setLeaveTypes] = useState<LeaveType[]>([]);
+
+    // Balances - will be populated from API and mapped to UI structure
     const [balances, setBalances] = useState<LeaveBalance[]>([]);
 
     // Form state
-    const [leaveType, setLeaveType] = useState('Annual');
+    const [leaveTypeId, setLeaveTypeId] = useState<number | null>(null);
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
     const [reason, setReason] = useState('');
@@ -62,20 +76,32 @@ export default function MyLeavesScreen() {
 
         setError(null);
 
-        // Fetch leave requests
+        // Fetch leave types
         try {
-            const response = await apiClient.leaves.list({
-                employee_id: user.employee_id,
-            });
+            const typesRes = await apiClient.leaves.getTypes();
+            const typesData: LeaveType[] = Array.isArray(typesRes?.data) ? typesRes.data : [];
+            setLeaveTypes(typesData);
+            // Set default leave type ID if available
+            if (typesData.length > 0 && !leaveTypeId) {
+                setLeaveTypeId(typesData[0].leave_type_id);
+            }
+        } catch (err: any) {
+            console.log('Leave types fetch error:', err?.response?.status || err.message);
+            setLeaveTypes([]);
+        }
+
+        // Fetch leave requests using new endpoint
+        try {
+            const response = await apiClient.leaves.getEmployeeRequests(user.employee_id);
 
             // Safely handle response data
             const rawData = response?.data;
-            const leavesData: Leave[] = Array.isArray(rawData) ? rawData : [];
+            const leavesData: LeaveRequest[] = Array.isArray(rawData) ? rawData : [];
 
-            // Sort by created date descending with safe date parsing
-            leavesData.sort((a: Leave, b: Leave) => {
-                const dateA = a?.created_at || a?.start_date ? new Date(a.created_at || a.start_date).getTime() : 0;
-                const dateB = b?.created_at || b?.start_date ? new Date(b.created_at || b.start_date).getTime() : 0;
+            // Sort by start date descending
+            leavesData.sort((a: LeaveRequest, b: LeaveRequest) => {
+                const dateA = a?.start_date ? new Date(a.start_date).getTime() : 0;
+                const dateB = b?.start_date ? new Date(b.start_date).getTime() : 0;
                 return dateB - dateA;
             });
 
@@ -88,53 +114,39 @@ export default function MyLeavesScreen() {
             setLeaves([]);
         }
 
-        // Fetch balances - separate try-catch
+        // Fetch balances using new structure
         try {
             const year = new Date().getFullYear();
             const balanceRes = await apiClient.leaves.getBalance(user.employee_id, year);
 
             if (Array.isArray(balanceRes?.data) && balanceRes.data.length > 0) {
-                const mappedBalances: LeaveBalance[] = balanceRes.data.map((item: any) => {
+                // Map API balances to UI structure
+                const mappedBalances: LeaveBalance[] = balanceRes.data.map((item: LeaveBalanceType) => {
                     const typeName = item?.leave_type_name || 'Leave';
-                    let config = { icon: 'calendar', color: '#6366F1', bgColor: '#EEF2FF', description: 'Leave type' };
-
-                    const typeNameLower = typeName.toLowerCase();
-                    if (typeNameLower.includes('annual') || typeNameLower.includes('casual')) {
-                        config = { icon: 'umbrella', color: '#3B82F6', bgColor: '#EFF6FF', description: 'Paid vacation & personal time' };
-                    } else if (typeNameLower.includes('sick')) {
-                        config = { icon: 'thermometer', color: '#F43F5E', bgColor: '#FFF1F2', description: 'Medical & health recovery' };
-                    } else if (typeNameLower.includes('earned')) {
-                        config = { icon: 'award', color: '#14B8A6', bgColor: '#F0FDFA', description: 'Accumulated based on work' };
-                    }
+                    const config = getLeaveTypeConfig(typeName);
 
                     return {
                         type: typeName,
-                        total: typeof item?.total === 'number' ? item.total : 0,
-                        used: typeof item?.used === 'number' ? item.used : 0,
-                        remaining: typeof item?.remaining === 'number' ? item.remaining : 0,
+                        total: item.total_quota || 0,
+                        used: item.used || 0,
+                        remaining: item.remaining || 0,
                         ...config
                     };
                 });
                 setBalances(mappedBalances);
             } else {
-                // Set default balances if no data
-                setBalances([
-                    { type: 'Annual', total: 0, used: 0, remaining: 0, icon: 'umbrella', color: '#3B82F6', bgColor: '#EFF6FF', description: 'Paid vacation & personal time' },
-                    { type: 'Sick', total: 0, used: 0, remaining: 0, icon: 'thermometer', color: '#F43F5E', bgColor: '#FFF1F2', description: 'Medical & health recovery' },
-                ]);
+                // Set empty balances if no data
+                setBalances([]);
             }
         } catch (err: any) {
             console.log('Balance fetch error:', err?.response?.status || err.message);
-            // Set default balances on error
-            setBalances([
-                { type: 'Annual', total: 0, used: 0, remaining: 0, icon: 'umbrella', color: '#3B82F6', bgColor: '#EFF6FF', description: 'Paid vacation & personal time' },
-                { type: 'Sick', total: 0, used: 0, remaining: 0, icon: 'thermometer', color: '#F43F5E', bgColor: '#FFF1F2', description: 'Medical & health recovery' },
-            ]);
+            // Set empty balances on error
+            setBalances([]);
         }
 
         setIsLoading(false);
         setRefreshing(false);
-    }, [user?.employee_id]);
+    }, [user?.employee_id, leaveTypeId]);
 
     useEffect(() => {
         fetchLeaves();
@@ -146,19 +158,22 @@ export default function MyLeavesScreen() {
     }, [fetchLeaves]);
 
     const handleApplyLeave = async () => {
-        if (!user?.employee_id || !startDate || !endDate) {
+        if (!user?.employee_id || !leaveTypeId || !startDate || !endDate) {
             Alert.alert('Error', 'Please fill in all required fields');
             return;
         }
 
+        const totalDays = calculateDays(startDate, endDate);
+
         setSubmitting(true);
         try {
-            await apiClient.leaves.create({
+            await apiClient.leaves.apply({
                 employee_id: user.employee_id,
-                leave_type: leaveType.toLowerCase(),
+                leave_type_id: leaveTypeId,
                 start_date: startDate,
                 end_date: endDate,
-                reason: reason,
+                total_days: totalDays,
+                reason: reason || undefined,
             });
             setShowApplyModal(false);
             resetForm();
@@ -172,7 +187,7 @@ export default function MyLeavesScreen() {
     };
 
     const resetForm = () => {
-        setLeaveType('Annual');
+        setLeaveTypeId(leaveTypes.length > 0 ? leaveTypes[0].leave_type_id : null);
         setStartDate('');
         setEndDate('');
         setReason('');
@@ -348,7 +363,7 @@ export default function MyLeavesScreen() {
                                                 {formatDate(leave.start_date)} - {formatDate(leave.end_date)}
                                             </Text>
                                             <Text style={styles.historyType}>
-                                                {leave.leave_type?.charAt(0).toUpperCase() + leave.leave_type?.slice(1)} Leave • {days} Day{days !== 1 ? 's' : ''}
+                                                {leave.leave_type_name || 'Leave'} • {leave.total_days} Day{leave.total_days !== 1 ? 's' : ''}
                                             </Text>
                                         </View>
                                     </View>
@@ -430,22 +445,22 @@ export default function MyLeavesScreen() {
                             <View style={styles.formGroup}>
                                 <Text style={styles.formLabel}>Leave Type</Text>
                                 <View style={styles.typeSelector}>
-                                    {LEAVE_TYPES.map((type) => (
+                                    {leaveTypes.map((type) => (
                                         <TouchableOpacity
-                                            key={type}
+                                            key={type.leave_type_id}
                                             style={[
                                                 styles.typeOption,
-                                                leaveType === type && styles.typeOptionSelected,
+                                                leaveTypeId === type.leave_type_id && styles.typeOptionSelected,
                                             ]}
-                                            onPress={() => setLeaveType(type)}
+                                            onPress={() => setLeaveTypeId(type.leave_type_id)}
                                         >
                                             <Text
                                                 style={[
                                                     styles.typeOptionText,
-                                                    leaveType === type && styles.typeOptionTextSelected,
+                                                    leaveTypeId === type.leave_type_id && styles.typeOptionTextSelected,
                                                 ]}
                                             >
-                                                {type}
+                                                {type.name} ({type.code})
                                             </Text>
                                         </TouchableOpacity>
                                     ))}

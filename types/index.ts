@@ -33,15 +33,84 @@ export interface Attendance {
     date: string;
     check_in?: string;
     check_out?: string;
-    status: 'present' | 'absent' | 'late' | 'half_day' | 'leave';
-    work_hours?: number;
-    net_hours?: number; // Added to match new endpoint
+    status: 'present' | 'absent' | 'late' | 'half_day' | 'leave' | 'on_leave';
+    work_hours?: number; // Legacy field
+    net_hours?: number; // New API field - replaces work_hours
     overtime_hours?: number;
     notes?: string;
     is_late?: boolean;
     is_overtime?: boolean;
+    is_payroll_locked?: boolean;
 }
 
+// Leave Types
+export interface LeaveType {
+    leave_type_id: number;
+    name: string;
+    code: string;
+    yearly_quota: number;
+    is_paid: boolean;
+    carry_forward: boolean;
+}
+
+export interface LeaveBalance {
+    id: number;
+    employee_id: number;
+    leave_type_id: number;
+    year: number;
+    total_quota: number;
+    used: number;
+    remaining: number;
+    carry_forwarded: number;
+    leave_type_name?: string;
+    is_paid?: boolean;
+}
+
+export interface LeaveRequest {
+    leave_id: number;
+    employee_id: number;
+    leave_type_id: number;
+    start_date: string;
+    end_date: string;
+    total_days: number;
+    reason?: string;
+    status: 'pending' | 'approved' | 'rejected';
+    leave_type_name?: string;
+}
+
+export interface LeaveHistoryItem {
+    history_id: number;
+    employee_id: number;
+    leave_type_id: number;
+    start_date: string;
+    end_date: string;
+    total_days: number;
+    leave_type_name: string;
+    is_paid: boolean;
+}
+
+export interface SalaryAfterLeaves {
+    employee_id: number;
+    year: number;
+    month: number;
+    base_salary: number;
+    unpaid_leave_days: number;
+    daily_salary: number;
+    deduction: number;
+    final_salary: number;
+}
+
+export interface LeaveAdminStats {
+    total_requests: number;
+    pending_requests: number;
+    approved_requests: number;
+    rejected_requests: number;
+    this_month_requests: number;
+    paid_leaves: number;
+    unpaid_leaves: number;
+}
+
+// Legacy Leave interface (for backwards compatibility)
 export interface Leave {
     leave_id: number;
     employee_id: number;
