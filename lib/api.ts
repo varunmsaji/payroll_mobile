@@ -82,6 +82,14 @@ export const apiClient = {
 
     // Attendance
     attendance: {
+        // Employee Attendance - New API structure
+        getEmployeeRange: (employeeId: number, startDate: string, endDate: string) =>
+            api.get(`/hrms/attendance/employee/${employeeId}`, {
+                params: { start_date: startDate, end_date: endDate }
+            }),
+        getToday: (employeeId: number) => api.get(`/hrms/attendance/employee/${employeeId}/today`),
+
+        // Legacy endpoints (for backwards compatibility)
         list: (params?: { date?: string; employee_id?: number; status?: string }) =>
             api.get('/hrms/attendance', { params }),
         get: (id: number) => api.get(`/hrms/attendance/${id}`),
@@ -89,22 +97,53 @@ export const apiClient = {
         checkOut: (employeeId: number) => api.post(`/hrms/attendance/check-out/${employeeId}`),
         update: (id: number, data: any) => api.put(`/hrms/attendance/${id}`, data),
         bulkUpdate: (data: any[]) => api.post('/hrms/attendance/bulk-update', { records: data }),
-        getToday: (employeeId: number) => api.get(`/hrms/attendance/employee/${employeeId}/today`),
     },
 
-    // Leaves
+    // Leaves - Updated to match new API documentation
     leaves: {
+        // Leave Types
+        getTypes: () => api.get('/hrms/leaves/types'),
+        createType: (data: { name: string; code: string; yearly_quota: number; is_paid: boolean; carry_forward: boolean }) =>
+            api.post('/hrms/leaves/types', data),
+
+        // Leave Balance
+        getBalance: (employeeId: number, year: number) =>
+            api.get(`/hrms/leaves/balance/${employeeId}/${year}`),
+        initBalance: (data: { employee_id: number; leave_type_id: number; year: number; quota: number; carry_forwarded: number }) =>
+            api.post('/hrms/leaves/balance/init', data),
+
+        // Apply Leave
+        apply: (data: { employee_id: number; leave_type_id: number; start_date: string; end_date: string; total_days: number; reason?: string }) =>
+            api.post('/hrms/leaves/apply', data),
+
+        // Leave Requests
+        getAllRequests: () => api.get('/hrms/leaves/requests'),
+        getPendingRequests: () => api.get('/hrms/leaves/requests/pending'),
+        getEmployeeRequests: (employeeId: number, params?: { status?: string }) =>
+            api.get(`/hrms/leaves/requests/${employeeId}`, { params }),
+
+        // Leave History
+        getHistory: (employeeId: number) => api.get(`/hrms/leaves/history/${employeeId}`),
+
+        // Admin Actions
+        approve: (leaveId: number) => api.post(`/hrms/leaves/admin/approve/${leaveId}`),
+        reject: (leaveId: number) => api.post(`/hrms/leaves/admin/reject/${leaveId}`),
+
+        // Salary Calculation
+        getSalaryAfterLeaves: (employeeId: number, year: number, month: number) =>
+            api.get(`/hrms/leaves/salary/${employeeId}/${year}/${month}`),
+
+        // Admin Stats
+        getAdminStats: () => api.get('/hrms/leaves/admin/stats'),
+
+        // Legacy methods (deprecated but kept for backwards compatibility)
         list: (params?: { status?: string; employee_id?: number }) =>
             api.get('/hrms/leaves', { params }),
         get: (id: number) => api.get(`/hrms/leaves/${id}`),
         create: (data: any) => api.post('/hrms/leaves', data),
-        approve: (id: number, approverId: number) =>
-            api.post(`/hrms/leaves/${id}/approve`, { approver_id: approverId }),
-        reject: (id: number, reason: string) =>
-            api.post(`/hrms/leaves/${id}/reject`, { reason }),
         cancel: (id: number) => api.post(`/hrms/leaves/${id}/cancel`),
-        getBalance: (employeeId: number, year: number) => api.get(`/hrms/leaves/balance/${employeeId}/${year}`),
-        requests: (employeeId: number, params?: { status?: string }) => api.get(`/hrms/leaves/requests/${employeeId}`, { params }),
+        requests: (employeeId: number, params?: { status?: string }) =>
+            api.get(`/hrms/leaves/requests/${employeeId}`, { params }),
     },
 
     // Payroll
